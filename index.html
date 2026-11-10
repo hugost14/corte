@@ -339,13 +339,84 @@ $('#fileA').onchange=e=>{
   a.onerror=()=>toast('No pude leer ese audio');
 };
 
+/* ---------- lectura de audio de videos de iPhone (.MOV/.MP4) ----------
+   Safari no decodifica el audio de un .MOV completo. Leo la pista AAC directo del archivo
+   (sin cargar el video entero en memoria), la convierto a ADTS y eso sí lo decodifica. */
+const OACx=()=>window.OfflineAudioContext||window.webkitOfflineAudioContext;
+const fcc=(dv,o)=>String.fromCharCode(dv.getUint8(o),dv.getUint8(o+1),dv.getUint8(o+2),dv.getUint8(o+3));
+const rdv=async(f,a,b)=>new DataView(await f.slice(a,b).arrayBuffer());
+function boxes(dv,s,e){const out=[];let o=s;while(o+8<=e){let sz=dv.getUint32(o),hs=8;const t=fcc(dv,o+4);
+  if(sz===1){sz=Number(dv.getBigUint64(o+8));hs=16}else if(sz===0)sz=e-o;if(sz<8||o+sz>e)break;out.push({t,s:o+hs,e:o+sz});o+=sz}return out}
+const kid=(dv,b,t)=>boxes(dv,b.s,b.e).find(k=>k.t===t);
+async function findMoov(f){let o=0;const n=f.size;
+  for(let i=0;i<64&&o+8<=n;i++){const h=await rdv(f,o,Math.min(n,o+16));let sz=h.getUint32(0);const t=fcc(h,4);
+    if(sz===1)sz=Number(h.getBigUint64(8));else if(sz===0)sz=n-o;if(sz<8)return null;
+    if(t==='moov')return new DataView(await f.slice(o,o+sz).arrayBuffer());o+=sz}
+  return null}
+function descLen(u,p){let l=0,i=0,b;do{b=u[p.i++];l=(l<<7)|(b&127)}while((b&128)&&++i<4);return l}
+function parseEsds(u){/* u: bytes que empiezan después del encabezado de la caja esds */
+  const p={i:4};while(p.i<u.length){const tag=u[p.i++],len=descLen(u,p),end=p.i+len;
+    if(tag===3){p.i+=2;const fl=u[p.i++];if(fl&128)p.i+=2;if(fl&64)p.i+=1+u[p.i];if(fl&32)p.i+=2;continue}
+    if(tag===4){p.i+=13;continue}
+    if(tag===5)return u.slice(p.i,end);
+    p.i=end}
+  return null}
+async function demuxAac(f){
+  const moov=await findMoov(f);if(!moov)return null;
+  for(const trak of boxes(moov,8,moov.byteLength).filter(b=>b.t==='trak')){
+    const mdia=kid(moov,trak,'mdia');if(!mdia)continue;const hdlr=kid(moov,mdia,'hdlr');if(!hdlr||fcc(moov,hdlr.s+8)!=='soun')continue;
+    const minf=kid(moov,mdia,'minf'),stbl=minf&&kid(moov,minf,'stbl'),stsd=stbl&&kid(moov,stbl,'stsd');if(!stsd)continue;
+    const ent=boxes(moov,stsd.s+8,stsd.e)[0];if(!ent||ent.t!=='mp4a')continue;
+    const eb=new Uint8Array(moov.buffer,moov.byteOffset+ent.s,ent.e-ent.s);let asc=null;
+    for(let i=0;i+4<eb.length;i++)if(eb[i]===0x65&&eb[i+1]===0x73&&eb[i+2]===0x64&&eb[i+3]===0x73){asc=parseEsds(eb.subarray(i+4));break}
+    if(!asc||asc.length<2)continue;
+    const obj=asc[0]>>3;let fi=((asc[0]&7)<<1)|(asc[1]>>7),ch=(asc[1]>>3)&15;
+    const SR=[96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000,7350];
+    let sr=SR[fi];if(fi===15){sr=((asc[1]&127)<<17)|(asc[2]<<9)|(asc[3]<<1)|(asc[4]>>7);fi=SR.reduce((b,v,i)=>Math.abs(v-sr)<Math.abs(SR[b]-sr)?i:b,0)}
+    if(obj<1||obj>4)continue;if(!ch)ch=2;
+    const stsz=kid(moov,stbl,'stsz'),stsc=kid(moov,stbl,'stsc'),stco=kid(moov,stbl,'stco')||kid(moov,stbl,'co64');if(!stsz||!stsc||!stco)continue;
+    const fixed=moov.getUint32(stsz.s+4),ns=moov.getUint32(stsz.s+8),size=i=>fixed||moov.getUint32(stsz.s+12+i*4);
+    const nsc=moov.getUint32(stsc.s+4),sc=[];for(let i=0;i<nsc;i++){const o=stsc.s+8+i*12;sc.push([moov.getUint32(o),moov.getUint32(o+4)])}
+    const is64=stco.t==='co64',nco=moov.getUint32(stco.s+4),off=i=>is64?Number(moov.getBigUint64(stco.s+8+i*8)):moov.getUint32(stco.s+8+i*4);
+    const chunks=[];let si=0;
+    for(let c=0;c<nco&&si<ns;c++){let k=0;while(k+1<sc.length&&sc[k+1][0]<=c+1)k++;const n=Math.min(sc[k][1],ns-si),sizes=[];let tot=0;
+      for(let j=0;j<n;j++){const z=size(si+j);sizes.push(z);tot+=z}chunks.push({o:off(c),sizes,tot});si+=n}
+    const frames=[];
+    for(let i=0;i<chunks.length;i+=8){const part=chunks.slice(i,i+8),bufs=await Promise.all(part.map(c=>f.slice(c.o,c.o+c.tot).arrayBuffer()));
+      part.forEach((c,j)=>{let p=0;const u=new Uint8Array(bufs[j]);c.sizes.forEach(z=>{frames.push(u.subarray(p,p+z));p+=z})})}
+    if(!frames.length)continue;
+    return{frames,asc,obj,sr,fi,ch};
+  }
+  return null}
+function adtsBlob(t){const parts=[];for(const fr of t.frames){const len=fr.length+7,h=new Uint8Array(7),pr=t.obj-1;
+  h[0]=0xFF;h[1]=0xF1;h[2]=((pr&3)<<6)|((t.fi&15)<<2)|((t.ch>>2)&1);h[3]=((t.ch&3)<<6)|((len>>11)&3);h[4]=(len>>3)&255;h[5]=((len&7)<<5)|31;h[6]=0xFC;parts.push(h,fr)}
+  return new Blob(parts,{type:'audio/aac'})}
+const decodeBuf=(ctx,buf)=>new Promise((res,rej)=>{const p=ctx.decodeAudioData(buf,res,rej);if(p&&p.then)p.then(res,rej)});
+async function webcodecsDecode(t,sr){
+  if(!('AudioDecoder' in window))throw new Error('sin decodificador');
+  const out=[];let rate=t.sr,nch=t.ch,err=null;
+  const dec=new AudioDecoder({output:d=>{rate=d.sampleRate;nch=d.numberOfChannels;const a=[];for(let c=0;c<nch;c++){const x=new Float32Array(d.numberOfFrames);d.copyTo(x,{planeIndex:c,format:'f32-planar'});a.push(x)}out.push(a);d.close()},error:e=>{err=e}});
+  dec.configure({codec:'mp4a.40.'+t.obj,sampleRate:t.sr,numberOfChannels:t.ch,description:t.asc});
+  let ts=0;for(const fr of t.frames){dec.decode(new EncodedAudioChunk({type:'key',timestamp:Math.round(ts),data:fr}));ts+=1024/t.sr*1e6}
+  await dec.flush();dec.close();if(err||!out.length)throw err||new Error('sin audio');
+  const n=out.reduce((a,x)=>a+x[0].length,0),O=OACx(),src=new O(nch,n,rate).createBuffer(nch,n,rate);
+  for(let c=0;c<nch;c++){const d=src.getChannelData(c);let p=0;out.forEach(x=>{d.set(x[Math.min(c,x.length-1)],p);p+=x[0].length})}
+  const oc=new O(1,Math.ceil(n*sr/rate),sr),bs=oc.createBufferSource();bs.buffer=src;bs.connect(oc.destination);bs.start();return oc.startRendering()}
+async function decodeAudio(s,sr){
+  const O=OACx(),ctx=()=>new O(1,sr,sr);
+  if(s.aac===undefined){try{s.aac=await demuxAac(s.file)}catch(e){s.aac=null}}
+  if(s.aac){
+    try{return await decodeBuf(ctx(),await adtsBlob(s.aac).arrayBuffer())}catch(e){}
+    try{return await webcodecsDecode(s.aac,sr)}catch(e){}
+  }
+  try{return await decodeBuf(ctx(),await s.file.arrayBuffer())}
+  catch(e){throw new Error(s.aac?'No pude decodificar el audio de "'+s.name+'"':'"'+s.name+'" no tiene audio que pueda leer')}
+}
+
 /* ---------- análisis de audio: silencios y muletillas ---------- */
 async function analyze(s){
   if(s.an)return s.an;
-  const buf=await s.file.arrayBuffer();
-  const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
-  const dc=actx||new OAC(1,44100,44100);
-  const ab=await new Promise((res,rej)=>{const p=dc.decodeAudioData(buf,res,rej);if(p&&p.then)p.then(res,rej)});
+  const ab=await decodeAudio(s,actx?actx.sampleRate:44100);
   const sr=ab.sampleRate,d0=ab.getChannelData(0),d1=ab.numberOfChannels>1?ab.getChannelData(1):null;
   const hop=Math.round(sr*0.01),frames=Math.floor(ab.length/hop),rms=new Float32Array(frames),zcr=new Float32Array(frames),sp=new Float32Array(frames),ratio=new Float32Array(frames);
   const co=(type,f0)=>{const w=2*Math.PI*f0/sr,al=Math.sin(w)/(2*0.707),c=Math.cos(w),a0=1+al;const b=type==='hp'?[(1+c)/2,-(1+c),(1+c)/2]:[(1-c)/2,1-c,(1-c)/2];return[b[0]/a0,b[1]/a0,b[2]/a0,-2*c/a0,(1-al)/a0]};
@@ -412,10 +483,10 @@ function cutRanges(map){
 async function autoCut(kind){
   stop();if(!S.clips.length||busy)return;busy=true;
   modal(`<h2>${kind==='sil'?'Buscando partes sin voz…':'Buscando muletillas…'}</h2><p class="note">Estoy leyendo el audio de tus clips. En videos largos tarda unos segundos.</p><div class="bar"><i style="width:40%"></i></div>`);
-  const map={};let fail=0,noVoice=0;
-  for(const id of new Set(S.clips.map(c=>c.src))){try{const an=await analyze(sources[id]);const r=kind==='sil'?silences(an,S.sens):fillers(an,S.sens);if(r===null)noVoice++;else map[id]=r}catch(e){fail++}}
+  const map={};let fail=0,noVoice=0,why='';
+  for(const id of new Set(S.clips.map(c=>c.src))){try{const an=await analyze(sources[id]);const r=kind==='sil'?silences(an,S.sens):fillers(an,S.sens);if(r===null)noVoice++;else map[id]=r}catch(e){fail++;why=String(e&&e.message||e)}}
   closeModal();busy=false;
-  if(fail&&!Object.keys(map).length){toast('No pude leer el audio de estos clips');return}
+  if(fail&&!Object.keys(map).length){toast(why||'No pude leer el audio de estos clips');return}
   if(kind==='sil'){
     const before=total(),nc=cutRanges(map);const cut=before-nc.reduce((a,c)=>a+cDur(c),0);
     if(cut<0.05){toast(noVoice?'No detecté voz en estos clips; no corté nada.':'No encontré partes sin voz. Prueba la sensibilidad Agresivo.');return}
@@ -654,8 +725,7 @@ async function genSubs(txt){
 let ASR=null;
 async function asrMod(){if(!ASR)ASR=await import('./asr/asr.mjs');return ASR}
 async function pcm16k(s){
-  const buf=await s.file.arrayBuffer(),OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext,oc=new OAC(1,16000,16000);
-  const ab=await new Promise((res,rej)=>{const p=oc.decodeAudioData(buf,res,rej);if(p&&p.then)p.then(res,rej)});
+  const ab=await decodeAudio(s,16000);
   if(ab.numberOfChannels===1)return ab.getChannelData(0);
   const a=ab.getChannelData(0),b=ab.getChannelData(1),m=new Float32Array(a.length);for(let i=0;i<a.length;i++)m[i]=(a[i]+b[i])*0.5;return m;
 }
@@ -664,7 +734,8 @@ async function runAsr(set){
   await M.load((p)=>set(p>=1?'Preparando el modelo de voz…':`Descargando el modelo de voz… ${Math.round(p*100)}%`,p*0.35));
   const ids=[...new Set(S.clips.map(c=>c.src))].filter(id=>!sources[id].asr);
   for(let k=0;k<ids.length;k++){set(`Escuchando tu voz · clip ${k+1} de ${ids.length}…`,0.35+0.65*k/ids.length);const s=sources[ids[k]];
-    try{s.asr=await M.transcribe(await pcm16k(s))}catch(e){if(/decod/i.test(String(e)))s.asr=[];else throw e}}
+    let pcm=null;try{pcm=await pcm16k(s)}catch(e){if(ids.length===1)throw e;s.asr=[];continue}
+    s.asr=await M.transcribe(pcm)}
   set('Listo',1);
 }
 async function autoSubs(){

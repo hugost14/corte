@@ -1,5 +1,5 @@
 // Corte · guarda la app completa en el teléfono para que funcione sin internet
-const APP='corte-app-24a3d391e1', MODEL='corte-model-11861ece64';
+const APP='corte-app-7f985b99ff', MODEL='corte-model-8af8ce772a';
 const APP_FILES=["./", "fonts/archivo-black-latin-400-normal.woff2", "fonts/archivo-black-latin-ext-400-normal.woff2", "fonts/bricolage-grotesque-latin-ext-wght-normal.woff2", "fonts/bricolage-grotesque-latin-wght-normal.woff2", "fonts/fonts.css", "fonts/jetbrains-mono-latin-500-normal.woff2", "fonts/jetbrains-mono-latin-ext-500-normal.woff2", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "index.html", "manifest.webmanifest"];
 const MODEL_FILES=["asr/asr.mjs", "asr/m/config.json", "asr/m/decoder-0.wasm", "asr/m/decoder-1.wasm", "asr/m/decoder-2.wasm", "asr/m/decoder-3.wasm", "asr/m/decoder-4.wasm", "asr/m/encoder-0.wasm", "asr/m/encoder-1.wasm", "asr/m/encoder-2.wasm", "asr/m/generation_config.json", "asr/m/manifest.json", "asr/m/preprocessor_config.json", "asr/m/tokenizer.json", "asr/m/tokenizer_config.json", "asr/ort.wasm", "asr/tf.mjs"];
 const post=async m=>{(await self.clients.matchAll({includeUncontrolled:true,type:'window'})).forEach(c=>c.postMessage(m))};
