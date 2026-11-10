@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="10nov-0915">
+<meta name="corte-build" content="10nov-0923">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Corte">
 <meta name="theme-color" content="#111215">
 <link rel="manifest" href="manifest.webmanifest">
@@ -349,7 +349,9 @@ function scheduleAudio(fromT){
     put(s.buf,t0+(from-fromT),o.in+(from-o.start),o.end-from,A.clipBus)});
   if(music&&music.buf)put(music.buf,t0,S.musicOffset+fromT,T-fromT,A.musicBus);
 }
-function nowT(){if(!clock)return curT;return clock.curT0+(clock.ctx?Math.max(0,actx.currentTime-clock.ctxT0):(performance.now()-clock.perf0)/1000)}
+/* lo que se oye va atrasado por la latencia de salida (mucho más con audífonos Bluetooth); el video la sigue */
+function outLat(){if(!actx||exporting)return 0;return Math.min(0.5,(actx.outputLatency||0)+(actx.baseLatency||0))}
+function nowT(){if(!clock)return curT;return clock.curT0+(clock.ctx?Math.max(0,actx.currentTime-outLat()-clock.ctxT0):(performance.now()-clock.perf0)/1000)}
 function startClock(){if(actx&&actx.state==='running')scheduleAudio(curT);else clock={ctx:false,perf0:performance.now(),curT0:curT}}
 
 /* ---------- import ---------- */
@@ -699,7 +701,7 @@ function filterStr(){const f=S.filt;return`brightness(${f.b}%) contrast(${f.c}%)
 function drawFit(c,v,W,H,mode){const vw=v.videoWidth,vh=v.videoHeight;if(!vw||!vh)return;const sc=mode==='cover'?Math.max(W/vw,H/vh):Math.min(W/vw,H/vh);const w=vw*sc,h=vh*sc;c.drawImage(v,(W-w)/2,(H-h)/2,w,h)}
 function draw(){
   const W=cv.width,H=cv.height,loc=locate(curT);
-  if(loc){const c=S.clips[loc.i],v=sources[c.src].el;if(playing&&v.seeking)return;
+  if(loc){const c=S.clips[loc.i],v=elFor(loc.i);if(playing&&v.seeking)return;
     ctx.filter='none';ctx.fillStyle=S.bg;ctx.fillRect(0,0,W,H);
     if(v.readyState>=2){const k=kfVal(c,loc.src),T=trState(c,loc);
       if(T.whip>=0&&prevSnap&&prevSnap._for===loc.i&&(playing||exporting)){ctx.save();if(T.blur)ctx.filter=`blur(${T.blur}px)`;ctx.drawImage(prevSnap,-T.whipE*W,0,W,H);ctx.restore()}
@@ -889,7 +891,7 @@ function fitApp(){
   /* iPhone con la app instalada: el contenido llega hasta debajo de la barra de estado, pero el alto que reporta Safari
      se queda corto y deja un hueco abajo. En ese caso uso el alto real de la pantalla. */
   const portrait=screen.height>screen.width,sameW=Math.abs(window.innerWidth-screen.width)<4;
-  if(portrait&&sameW&&(isStandalone()||safeTop()>20)&&screen.height>h)h=screen.height;
+  if(false&&portrait&&sameW&&isStandalone()&&screen.height>h)h=screen.height;/* desactivado: en iPhone la franja de abajo no se dibuja; se resuelve con la barra de estado opaca */
   document.documentElement.style.setProperty('--app-h',h+'px');
 }
 function layout(){fitApp();const st=$('#stage'),sw=st.clientWidth,sh=st.clientHeight-8;if(sw<=0||sh<=0)return;const sc=Math.min(sw/cv.width,sh/cv.height),w=Math.floor(cv.width*sc)+'px',h=Math.floor(cv.height*sc)+'px';cv.style.width=w;cv.style.height=h;const vh=$('#vhost');vh.style.width=w;vh.style.height=h}
@@ -938,23 +940,46 @@ $('#zOut').onclick=()=>{pps=Math.max(6,pps/1.5);renderTL()};
 
 /* ---------- playback ---------- */
 function showFrame(){syncOv();const loc=locate(curT);if(!loc){draw();return}const v=sources[S.clips[loc.i].src].el;if(Math.abs(v.currentTime-loc.src)>0.02)v.currentTime=loc.src;draw()}
+/* Sincronía audio-video:
+   - Cada archivo tiene dos reproductores (A/B). Mientras suena un corte, el otro ya está esperando en el inicio del
+     siguiente, así el salto entre cortes es instantáneo (en iPhone un salto dentro del video tarda en llegar).
+   - Dentro de un corte, el desfase se corrige acelerando o frenando el video un poco, sin saltos. */
+let curEl=null,prepared=null,rateT=0;
+function mkEl(s){const v=document.createElement('video');v.muted=true;v.defaultMuted=true;v.setAttribute('muted','');v.playsInline=true;v.setAttribute('playsinline','');v.preload='auto';v.src=s.url;$('#vhost').appendChild(v);v.load();return v}
+function otherEl(s,v){if(v===s.el){if(!s.el2)s.el2=mkEl(s);return s.el2}return s.el}
+function elFor(i){return playing&&i===activeIdx&&curEl?curEl:sources[S.clips[i].src].el}
+function prepareNext(i){
+  prepared=null;const n=i+1;if(n>=S.clips.length)return;const c=S.clips[n],s=sources[c.src];if(!s)return;
+  const v=(curEl&&s===sources[S.clips[i].src])?otherEl(s,curEl):(curEl===s.el?otherEl(s,curEl):s.el);
+  if(!v.paused)v.pause();v.playbackRate=c.speed;if(Math.abs(v.currentTime-c.in)>0.02)v.currentTime=c.in;prepared={n,v};
+}
 function startVideo(loc){
-  const c=S.clips[loc.i],v=sources[c.src].el;
-  Object.values(sources).forEach(s=>{if(s.el!==v&&!s.ov&&!s.el.paused)s.el.pause()});
-  v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>0.03)v.currentTime=loc.src;
-  const p=v.play();if(p)p.catch(()=>{});
+  const c=S.clips[loc.i],s=sources[c.src];
+  let v=prepared&&prepared.n===loc.i?prepared.v:(curEl&&(curEl===s.el||curEl===s.el2)?curEl:s.el);
+  if(curEl&&curEl!==v&&!curEl.paused)curEl.pause();
+  Object.values(sources).forEach(x=>[x.el,x.el2].forEach(e=>{if(e&&e!==v&&!x.ov&&!e.paused&&!(prepared&&e===prepared.v))e.pause()}));
+  v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>0.08)v.currentTime=loc.src;
+  const p=v.play();if(p)p.catch(()=>{});curEl=v;stall={t:-1,since:0};
+  prepareNext(loc.i);
 }
 let stall={t:-1,since:0};
 function syncVideo(loc){
-  const c=S.clips[loc.i],v=sources[c.src].el;
+  const c=S.clips[loc.i],v=curEl||sources[c.src].el;
   /* vigilante: si el video deja de avanzar, lo vuelvo a arrancar y lo anoto para el diagnóstico */
   const now=performance.now();if(Math.abs(v.currentTime-stall.t)>0.001){stall={t:v.currentTime,since:now}}
   else if(now-stall.since>1500){stall.since=now;errLog.push('video sin avanzar ('+sources[c.src].name+', ready '+v.readyState+', paused '+v.paused+')');try{v.play().catch(()=>{})}catch(e){}}
   if(v.seeking)return;
-  if(Math.abs(v.currentTime-loc.src)>0.25)v.currentTime=Math.min(c.out-0.01,loc.src+0.04*c.speed);
-  else if(v.paused){const p=v.play();if(p)p.catch(()=>{})}
+  const d=v.currentTime-loc.src;/* >0: el video va adelantado */
+  if(Math.abs(d)>0.6){v.playbackRate=c.speed;v.currentTime=Math.min(c.out-0.01,loc.src+0.12*c.speed);return}
+  if(v.paused){const p=v.play();if(p)p.catch(()=>{})}
+  if(now-rateT>200){rateT=now;const want=Math.abs(d)<0.03?c.speed:c.speed*cl(1-d*1.6,0.8,1.25);if(Math.abs(v.playbackRate-want)>0.015)v.playbackRate=want}
 }
 let playUntil=-1;
+function unlockEls(){/* iOS: el primer play de cada reproductor debe salir directo de un toque */
+  const multi=new Set();S.clips.forEach((c,i)=>{if(i&&S.clips[i-1].src===c.src)multi.add(c.src)});
+  Object.values(sources).forEach(s=>{if(multi.has(s.id)&&!s.el2)s.el2=mkEl(s);
+    [s.el,s.el2].forEach(e=>{if(!e||e._gest)return;e._gest=true;const p=e.play();if(p)p.then(()=>{if(e!==curEl||!playing)e.pause()}).catch(()=>{e._gest=false})})});
+}
 function ensureCtx(){ensureAudio();if(actx&&actx.state!=='running'){try{actx.resume()}catch(e){}}applyAudio()}
 function play(until){
   if(!S.clips.length)return;ensureCtx();
@@ -962,16 +987,25 @@ function play(until){
   playUntil=typeof until==='number'?until:-1;
   playing=true;activeIdx=-1;setPlayIco();const tok=++playTok;
   /* iOS: el primer play de cada video debe salir directo del toque */
-  Object.values(sources).forEach(s=>{if(s._gest)return;s._gest=true;const p=s.el.play();if(p)p.then(()=>{const c=S.clips[activeIdx];if(s.ov||!(playing&&c&&sources[c.src]===s))s.el.pause()}).catch(()=>{s._gest=false})});
-  const loc0=locate(curT);if(loc0){activeIdx=loc0.i;startVideo(loc0)}
-  stall={t:-1,since:0};
+  unlockEls();
+  curEl=null;prepared=null;
+  const loc0=locate(curT);if(loc0){activeIdx=loc0.i;startVideo(loc0);curEl.pause()}
   prepareAudio().then(async()=>{
     if(!playing||tok!==playTok)return;
     if(actx&&actx.state!=='running'){try{await Promise.race([actx.resume(),new Promise(r=>setTimeout(r,600))])}catch(e){}}
-    if(!playing||tok!==playTok)return;startClock();requestAnimationFrame(tick)});
+    if(!playing||tok!==playTok)return;
+    /* arranco audio y video juntos: espero a que el video esté en el cuadro correcto */
+    const v=curEl;if(v){if(Math.abs(v.currentTime-locate(curT).src)>0.05){v.currentTime=locate(curT).src}
+      if(v.seeking)await Promise.race([new Promise(r=>v.addEventListener('seeked',r,{once:true})),new Promise(r=>setTimeout(r,900))]);
+      if(!playing||tok!==playTok)return;const p=v.play();if(p)p.catch(()=>{})}
+    startClock();requestAnimationFrame(tick)});
 }
 function stop(){
-  playing=false;playTok++;stopAudio();clock=null;activeIdx=-1;Object.values(sources).forEach(s=>{if(!s.el.paused)s.el.pause()});setPlayIco();
+  playing=false;playTok++;stopAudio();clock=null;activeIdx=-1;
+  Object.values(sources).forEach(s=>[s.el,s.el2].forEach(e=>{if(e&&!e.paused)e.pause()}));
+  /* deja el reproductor principal en el cuadro donde se pausó, para la vista previa */
+  const l=locate(curT);if(l&&curEl){const s=sources[S.clips[l.i].src];if(curEl!==s.el){s.el.currentTime=curEl.currentTime}}
+  curEl=null;prepared=null;setPlayIco();
 }
 function tick(){
   if(!playing||!clock)return;
@@ -1221,7 +1255,7 @@ async function startExport(){
   if(!S.clips.length||exporting||busy)return;stop();
   const mime=pickMime();
   if(mime===null||!cv.captureStream){modal(`<h2>Exportar no está disponible</h2><p class="note">Este navegador no permite grabar video desde la página. Actualiza tu iPhone a la versión más reciente de iOS.</p><div class="row"><button class="btn" id="mClose">Cerrar</button></div>`);$('#mClose').onclick=closeModal;return}
-  ensureCtx();busy=true;modal(`<h2>Preparando el audio…</h2><div class="bar"><i style="width:30%"></i></div>`);
+  ensureCtx();unlockEls();busy=true;modal(`<h2>Preparando el audio…</h2><div class="bar"><i style="width:30%"></i></div>`);
   try{await prepareAudio()}catch(e){}busy=false;closeModal();
   const stream=cv.captureStream(30);
   if(recDest)recDest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
@@ -1278,6 +1312,7 @@ function showDiag(){
   $('#dCopy').onclick=()=>{try{navigator.clipboard.writeText(txt).then(()=>toast('Copiado'),()=>toast('Mantén presionado el texto para copiarlo'))}catch(e){toast('Mantén presionado el texto para copiarlo')}};
 }
 
+window.__corte={state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
 window.addEventListener('orientationchange',()=>setTimeout(layoutSoon,300));
 setDims();refresh(false);draw();
 })();
