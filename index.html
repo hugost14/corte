@@ -284,7 +284,8 @@ function ensureAudio(){
     A.voiceIn.connect(A.hp);A.hp.connect(A.lp);A.lp.connect(A.mud);A.mud.connect(A.pres);A.pres.connect(A.air);A.air.connect(A.comp);A.comp.connect(A.makeup);A.makeup.connect(A.lim);A.lim.connect(A.master);A.master.connect(actx.destination);
     if(actx.createMediaStreamDestination){recDest=actx.createMediaStreamDestination();A.master.connect(recDest)}
     applyAudio();
-    Object.values(sources).forEach(s=>route(s.el,false));if(music)route(music.el,true);
+    A.clipBus=actx.createGain();A.clipBus.connect(A.voiceIn);A.musicBus=actx.createGain();A.musicBus.connect(A.lim);
+    actx.onstatechange=()=>{if(playing&&clock&&clock.ctx&&actx.state!=='running'&&!exporting)stop()};
     if(actx.audioWorklet&&window.AudioWorkletNode){
       const url=URL.createObjectURL(new Blob([GATE_SRC],{type:'application/javascript'}));
       actx.audioWorklet.addModule(url).then(()=>{A.gate=new AudioWorkletNode(actx,'gate-corte',{outputChannelCount:[2]});A.hp.disconnect();A.hp.connect(A.gate);A.gate.connect(A.lp);applyAudio()}).catch(()=>{});
@@ -300,14 +301,48 @@ function applyAudio(){
   A.comp.threshold.value=v?-26:0;A.comp.ratio.value=v?3.5:1;A.comp.knee.value=v?8:0;A.comp.attack.value=.005;A.comp.release.value=.2;
   A.makeup.gain.setTargetAtTime(v?1.6:1,t,.02);
 }
-function route(el,isMusic){if(!actx||el._g)return;try{const n=actx.createMediaElementSource(el),g=actx.createGain();n.connect(g);g.connect(isMusic?A.lim:A.voiceIn);el._g=g}catch(e){}}
-function setVol(el,v){if(el._g)el._g.gain.value=v;else el.volume=cl(v,0,1)}
-function unlock(){
-  ensureAudio();if(actx&&actx.state!=='running')actx.resume().catch(()=>{});
-  const els=Object.values(sources).map(s=>s.el);if(music)els.push(music.el);
-  els.forEach(el=>{if(el._u)return;el._u=true;const p=el.play();if(p)p.then(()=>{if(el!==activeEl())el.pause()}).catch(()=>{})});
+/* ---------- motor de audio: los videos van siempre mudos y el audio se toca aparte ----------
+   En iPhone, conectar un <video> al procesador de audio lo congela en el primer cuadro.
+   Por eso decodifico el audio de cada archivo y lo programo con Web Audio, sincronizado al video. */
+let sched=[],clock=null,playTok=0;
+function srcBuf(s){if(!s.bufP)s.bufP=decodeAudio(s,actx?actx.sampleRate:48000).then(b=>(s.buf=b),e=>{s.bufErr=String(e&&e.message||e);return(s.buf=null)});return s.bufP}
+function wsola(buf,speed){/* cambia la velocidad sin cambiar el tono de la voz */
+  const sr=buf.sampleRate,nch=buf.numberOfChannels,inL=buf.length,N=Math.round(sr*0.03)&~1,Hs=N>>1,Ha=Hs*speed,tol=Math.round(sr*0.008);
+  const win=new Float32Array(N);for(let i=0;i<N;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/N);
+  const ch=[];for(let c=0;c<nch;c++)ch.push(buf.getChannelData(c));const m=ch[0];
+  const outL=Math.max(1,Math.ceil(inL/speed)+N),out=ch.map(()=>new Float32Array(outL));
+  let prev=0,o=0;
+  for(let k=0;;k++,o+=Hs){const nom=Math.round(k*Ha);if(nom+N>=inL||o+N>=outL)break;let best=nom;
+    if(k>0){const ref=prev+Hs;let bc=-Infinity;for(let d=-tol;d<=tol;d+=2){const p=nom+d;if(p<0||p+N>=inL)continue;let s=0;for(let i=0;i<Hs;i+=8)s+=m[p+i]*m[ref+i];if(s>bc){bc=s;best=p}}}
+    for(let c=0;c<nch;c++){const a=ch[c],b=out[c];for(let i=0;i<N;i++)b[o+i]+=a[best+i]*win[i]}prev=best}
+  const nb=new AudioBuffer({length:outL,numberOfChannels:nch,sampleRate:sr});out.forEach((x,c)=>nb.copyToChannel(x,c));return nb}
+async function clipBuf(s,speed){await srcBuf(s);if(!s.buf)return null;if(speed===1)return s.buf;s.str=s.str||{};
+  if(!s.str[speed]){await new Promise(r=>setTimeout(r,0));s.str[speed]=wsola(s.buf,speed)}return s.str[speed]}
+async function prepareAudio(){
+  const jobs=[];S.clips.forEach(c=>{if(!c.mute&&sources[c.src])jobs.push(clipBuf(sources[c.src],c.speed))});
+  S.overlays.forEach(o=>{if(o.kind==='video'&&!o.mute&&sources[o.src])jobs.push(srcBuf(sources[o.src]))});
+  if(music&&!music.bufP)music.bufP=decodeAudio(music,actx?actx.sampleRate:48000).then(b=>(music.buf=b),()=>(music.buf=null));
+  if(music)jobs.push(music.bufP);
+  let slow=setTimeout(()=>toast('Preparando el audio…'),400);
+  await Promise.all(jobs);clearTimeout(slow);
 }
-function activeEl(){const c=S.clips[activeIdx];return playing&&c?sources[c.src].el:null}
+function stopAudio(){sched.forEach(n=>{try{n.stop()}catch(e){}});sched=[]}
+function scheduleAudio(fromT){
+  stopAudio();const t0=actx.currentTime+0.05,T=total();clock={ctx:true,ctxT0:t0,curT0:fromT};
+  A.clipBus.gain.value=S.origVol;A.musicBus.gain.value=S.musicVol;
+  const put=(buf,when,off,dur,bus)=>{if(!buf||dur<=0.02||off>=buf.duration)return;dur=Math.min(dur,buf.duration-off);
+    const n=actx.createBufferSource(),g=actx.createGain();n.buffer=buf;
+    g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+0.008);g.gain.setValueAtTime(1,Math.max(when+0.008,when+dur-0.01));g.gain.linearRampToValueAtTime(0,when+dur);
+    n.connect(g);g.connect(bus);n.start(when,Math.max(0,off),dur);sched.push(n)};
+  let st=0;S.clips.forEach(c=>{const d=cDur(c),en=st+d,s=sources[c.src];
+    if(!c.mute&&s&&en>fromT){const from=Math.max(fromT,st),buf=c.speed===1?s.buf:(s.str&&s.str[c.speed]);
+      put(buf,t0+(from-fromT),(c.in+(from-st)*c.speed)/c.speed,en-from,A.clipBus)}st=en});
+  S.overlays.forEach(o=>{if(o.kind!=='video'||o.mute||o.end<=fromT)return;const s=sources[o.src];if(!s)return;const from=Math.max(fromT,o.start);
+    put(s.buf,t0+(from-fromT),o.in+(from-o.start),o.end-from,A.clipBus)});
+  if(music&&music.buf)put(music.buf,t0,S.musicOffset+fromT,T-fromT,A.musicBus);
+}
+function nowT(){if(!clock)return curT;return clock.curT0+(clock.ctx?Math.max(0,actx.currentTime-clock.ctxT0):(performance.now()-clock.perf0)/1000)}
+function startClock(){if(actx&&actx.state==='running')scheduleAudio(curT);else clock={ctx:false,perf0:performance.now(),curT0:curT}}
 
 /* ---------- import ---------- */
 $('#importBtn').onclick=$('#addBtn').onclick=()=>$('#fileV').click();
@@ -321,22 +356,25 @@ $('#fileV').onchange=async e=>{
 };
 function loadSource(f){return new Promise((res,rej)=>{
   const id=uid(),url=URL.createObjectURL(f),v=document.createElement('video');
-  v.playsInline=true;v.setAttribute('playsinline','');v.preload='auto';v.src=url;$('#vhost').appendChild(v);
+  v.muted=true;v.defaultMuted=true;v.setAttribute('muted','');v.playsInline=true;v.setAttribute('playsinline','');v.preload='auto';v.src=url;$('#vhost').appendChild(v);
   const s={id,name:f.name,file:f,url,el:v,dur:0,thumb:'',an:null};
   v.addEventListener('seeked',()=>{if(!playing&&!exporting&&!busy)draw()});
   v.onerror=()=>rej();
-  v.onloadedmetadata=()=>{
+  v.onloadedmetadata=async()=>{
     s.dur=isFinite(v.duration)?v.duration:0;if(!s.dur){rej();return}
-    sources[id]=s;route(v,false);
+    sources[id]=s;
+    try{await Promise.race([v.play(),new Promise(r=>setTimeout(r,1500))]);v.pause()}catch(e){}/* en iPhone, reproducir mudo un instante hace que cargue los cuadros */
     let done=false;const fin=()=>{if(done)return;done=true;try{const c=document.createElement('canvas');c.width=72;c.height=128;drawFit(c.getContext('2d'),v,72,128,'cover');s.thumb=c.toDataURL('image/jpeg',.6)}catch(e){}res(s)};
     v.addEventListener('seeked',fin,{once:true});v.currentTime=Math.min(0.4,s.dur/2);setTimeout(fin,2500);
   };
+  v.load();
 })}
-$('#fileA').onchange=e=>{
-  const f=e.target.files[0];e.target.value='';if(!f)return;
-  const a=document.createElement('audio');a.preload='auto';a.src=URL.createObjectURL(f);$('#vhost').appendChild(a);
-  a.onloadedmetadata=()=>{if(music){music.el.pause();music.el.remove()}music={name:f.name.replace(/\.[^.]+$/,''),el:a,dur:isFinite(a.duration)?a.duration:0};route(a,true);S.musicOffset=0;refresh(true);toast('Música agregada')};
-  a.onerror=()=>toast('No pude leer ese audio');
+$('#fileV').addEventListener('change',()=>setTimeout(()=>Object.values(sources).forEach(s=>{if(!s.ov)srcBuf(s)}),1500));
+$('#fileA').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;stop();
+  const m={name:f.name.replace(/\.[^.]+$/,''),file:f,dur:0,buf:null};toast('Cargando música…');
+  try{m.bufP=decodeAudio(m,actx?actx.sampleRate:48000).then(b=>(m.buf=b));await m.bufP;m.dur=m.buf.duration;music=m;S.musicOffset=0;refresh(true);toast('Música agregada')}
+  catch(err){toast('No pude leer ese audio')}
 };
 
 /* ---------- lectura de audio de videos de iPhone (.MOV/.MP4) ----------
@@ -416,7 +454,7 @@ async function decodeAudio(s,sr){
 /* ---------- análisis de audio: silencios y muletillas ---------- */
 async function analyze(s){
   if(s.an)return s.an;
-  const ab=await decodeAudio(s,actx?actx.sampleRate:44100);
+  const ab=await srcBuf(s);if(!ab)throw new Error(s.bufErr||'No pude leer el audio de "'+s.name+'"');
   const sr=ab.sampleRate,d0=ab.getChannelData(0),d1=ab.numberOfChannels>1?ab.getChannelData(1):null;
   const hop=Math.round(sr*0.01),frames=Math.floor(ab.length/hop),rms=new Float32Array(frames),zcr=new Float32Array(frames),sp=new Float32Array(frames),ratio=new Float32Array(frames);
   const co=(type,f0)=>{const w=2*Math.PI*f0/sr,al=Math.sin(w)/(2*0.707),c=Math.cos(w),a0=1+al;const b=type==='hp'?[(1+c)/2,-(1+c),(1+c)/2]:[(1-c)/2,1-c,(1-c)/2];return[b[0]/a0,b[1]/a0,b[2]/a0,-2*c/a0,(1-al)/a0]};
@@ -811,7 +849,7 @@ function drawOverlays(t){
 }
 function syncOv(){
   for(const o of S.overlays){if(o.kind!=='video')continue;const s=sources[o.src];if(!s)continue;const v=s.el,active=curT>=o.start&&curT<o.end,t=o.in+(curT-o.start);
-    if(playing&&active){setVol(v,o.mute?0:S.origVol);v.playbackRate=1;if(Math.abs(v.currentTime-t)>0.3)v.currentTime=t;if(v.paused){const p=v.play();if(p)p.catch(()=>{})}}
+    if(playing&&active){v.playbackRate=1;if(Math.abs(v.currentTime-t)>0.3&&!v.seeking)v.currentTime=t;if(v.paused){const p=v.play();if(p)p.catch(()=>{})}}
     else{if(!v.paused)v.pause();if(active&&!playing&&Math.abs(v.currentTime-t)>0.03)v.currentTime=t}}
 }
 function hitOv(px,py){for(let i=S.overlays.length-1;i>=0;i--){const o=S.overlays[i];if(curT<o.start||curT>=o.end)continue;const r=ovRect(o);if(r&&px>=r.x&&px<=r.x+r.w&&py>=r.y&&py<=r.y+r.h)return o}return null}
@@ -881,43 +919,40 @@ $('#zOut').onclick=()=>{pps=Math.max(6,pps/1.5);renderTL()};
 
 /* ---------- playback ---------- */
 function showFrame(){syncOv();const loc=locate(curT);if(!loc){draw();return}const v=sources[S.clips[loc.i].src].el;if(Math.abs(v.currentTime-loc.src)>0.02)v.currentTime=loc.src;draw()}
-function startAt(t){
-  const loc=locate(t);if(!loc){stop();return}
-  activeIdx=loc.i;const c=S.clips[loc.i],v=sources[c.src].el;
-  Object.values(sources).forEach(s=>{if(s.el!==v&&!s.ov)s.el.pause()});
-  v.playbackRate=c.speed;try{v.preservesPitch=true}catch(e){}
-  if(Math.abs(v.currentTime-loc.src)>0.03)v.currentTime=loc.src;
-  setVol(v,c.mute?0:S.origVol);
+function startVideo(loc){
+  const c=S.clips[loc.i],v=sources[c.src].el;
+  Object.values(sources).forEach(s=>{if(s.el!==v&&!s.ov&&!s.el.paused)s.el.pause()});
+  v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>0.03)v.currentTime=loc.src;
   const p=v.play();if(p)p.catch(()=>{});
 }
-function syncMusic(force){
-  if(!music)return;const a=music.el,target=curT+S.musicOffset;setVol(a,S.musicVol);
-  if(!playing||target>=music.dur){a.pause();return}
-  if(force||Math.abs(a.currentTime-target)>0.3)a.currentTime=target;
-  if(a.paused){const p=a.play();if(p)p.catch(()=>{})}
+function syncVideo(loc){
+  const c=S.clips[loc.i],v=sources[c.src].el;if(v.seeking)return;
+  if(Math.abs(v.currentTime-loc.src)>0.25)v.currentTime=Math.min(c.out-0.01,loc.src+0.04*c.speed);
+  else if(v.paused){const p=v.play();if(p)p.catch(()=>{})}
 }
 let playUntil=-1;
+function ensureCtx(){ensureAudio();if(actx&&actx.state!=='running'){try{actx.resume()}catch(e){}}applyAudio()}
 function play(until){
-  if(!S.clips.length)return;unlock();applyAudio();
+  if(!S.clips.length)return;ensureCtx();
   if(curT>=total()-0.05)curT=0;
   playUntil=typeof until==='number'?until:-1;
-  playing=true;setPlayIco();startAt(curT);syncMusic(true);requestAnimationFrame(tick);
+  playing=true;activeIdx=-1;setPlayIco();const tok=++playTok;
+  prepareAudio().then(async()=>{
+    if(!playing||tok!==playTok)return;
+    if(actx&&actx.state!=='running'){try{await Promise.race([actx.resume(),new Promise(r=>setTimeout(r,600))])}catch(e){}}
+    if(!playing||tok!==playTok)return;startClock();requestAnimationFrame(tick)});
 }
 function stop(){
-  playing=false;activeIdx=-1;Object.values(sources).forEach(s=>s.el.pause());if(music)music.el.pause();setPlayIco();
+  playing=false;playTok++;stopAudio();clock=null;activeIdx=-1;Object.values(sources).forEach(s=>{if(!s.el.paused)s.el.pause()});setPlayIco();
 }
 function tick(){
-  if(!playing)return;
-  const c=S.clips[activeIdx];if(!c){stop();return}
-  const v=sources[c.src].el,st=cStart(activeIdx);
-  if(!v.seeking)curT=Math.min(st+cDur(c),st+Math.max(0,v.currentTime-c.in)/c.speed);
+  if(!playing||!clock)return;
+  const T=total();curT=Math.min(T,nowT());
   if(playUntil>=0&&curT>=playUntil){stop();draw();updTime();return}
-  if(!v.seeking&&(v.currentTime>=c.out-0.035||v.ended)){
-    const n=activeIdx+1;
-    if(n<S.clips.length){snapPrev(n);curT=cStart(n);startAt(curT)}
-    else{curT=total();draw();stop();updTime();syncScroll();if(exporting)finishRec();return}
-  }
-  syncOv();draw();syncMusic(false);updTime();syncScroll();
+  if(curT>=T-0.001){curT=T;draw();stop();updTime();syncScroll();if(exporting)finishRec();return}
+  const loc=locate(curT);if(!loc){stop();return}
+  if(loc.i!==activeIdx){if(activeIdx>=0)snapPrev(loc.i);activeIdx=loc.i;startVideo(loc)}else syncVideo(loc);
+  syncOv();draw();updTime();syncScroll();
   if(exporting){const b=$('#expBar');if(b)b.style.width=(curT/total()*100).toFixed(1)+'%'}
   requestAnimationFrame(tick);
 }
@@ -1007,7 +1042,7 @@ function act(a,v){
         else if(a==='ovdel'){S.overlays=S.overlays.filter(x=>x!==o);selOv=null}
       });return}
     case 'music':$('#fileA').click();return;
-    case 'mdel':if(music){music.el.pause();music.el.remove();music=null;refresh(true);toast('Música quitada')}return;
+    case 'mdel':if(music){music=null;refresh(true);toast('Música quitada')}return;
     case 'autofilter':autoFilter();return;
     case 'filter':commit(()=>{S.filt={...FILTERS.find(f=>f.name===v)}});return;
     case 'aspect':commit(()=>{S.aspect=v;setDims()});return;
@@ -1121,9 +1156,9 @@ panel.addEventListener('input',e=>{
     case 'suboff':S.subs.offset=v;out.textContent=(v>0?'+':'')+v.toFixed(2)+'s';buildSubs();break;
     case 'tsize':t.size=v;out.textContent=v;break;
     case 'ty':t.y=v;out.textContent=v+'%';break;
-    case 'origVol':S.origVol=v/100;out.textContent=v+'%';{const c=S.clips[activeIdx];if(playing&&c)setVol(sources[c.src].el,c.mute?0:S.origVol)}break;
-    case 'musicVol':S.musicVol=v/100;out.textContent=v+'%';if(music)setVol(music.el,S.musicVol);break;
-    case 'musicOffset':S.musicOffset=v;out.textContent=short(v);if(playing)syncMusic(true);break;
+    case 'origVol':S.origVol=v/100;out.textContent=v+'%';if(A.clipBus)A.clipBus.gain.value=S.origVol;break;
+    case 'musicVol':S.musicVol=v/100;out.textContent=v+'%';if(A.musicBus)A.musicBus.gain.value=S.musicVol;break;
+    case 'musicOffset':S.musicOffset=v;out.textContent=short(v);if(playing&&clock&&clock.ctx){curT=nowT();scheduleAudio(curT)}break;
     case 'fb':S.filt.b=v;S.filt.name='';out.textContent=v;break;
     case 'fc':S.filt.c=v;S.filt.name='';out.textContent=v;break;
     case 'fs':S.filt.s=v;S.filt.name='';out.textContent=v;break;
@@ -1154,11 +1189,12 @@ function pickMime(){if(!window.MediaRecorder)return null;const l=['video/mp4;cod
 function modal(html){const m=$('#modal');m.innerHTML=`<div class="card">${html}</div>`;m.hidden=false}
 function closeModal(){$('#modal').hidden=true;$('#modal').innerHTML=''}
 $('#exportBtn').onclick=startExport;
-function startExport(){
+async function startExport(){
   if(!S.clips.length||exporting||busy)return;stop();
   const mime=pickMime();
   if(mime===null||!cv.captureStream){modal(`<h2>Exportar no está disponible</h2><p class="note">Este navegador no permite grabar video desde la página. Actualiza tu iPhone a la versión más reciente de iOS.</p><div class="row"><button class="btn" id="mClose">Cerrar</button></div>`);$('#mClose').onclick=closeModal;return}
-  unlock();applyAudio();
+  ensureCtx();busy=true;modal(`<h2>Preparando el audio…</h2><div class="bar"><i style="width:30%"></i></div>`);
+  try{await prepareAudio()}catch(e){}busy=false;closeModal();
   const stream=cv.captureStream(30);
   if(recDest)recDest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
   try{rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:S.res>=1080?9e6:5e6}:{})}catch(e){try{rec=new MediaRecorder(stream)}catch(e2){toast('No pude iniciar la grabación');return}}
