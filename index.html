@@ -37,7 +37,8 @@ html{box-sizing:border-box;height:100%}
 body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--ui);overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.app{height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+/* la app ocupa la pantalla completa (en iPhone instalado, 100% se queda corto y deja un hueco abajo) */
+.app{position:fixed;top:0;left:0;right:0;height:var(--app-h,100%);max-width:560px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:max(6px,env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 
 .top{display:flex;align-items:center;gap:8px;padding-block:8px}
 .brand{display:flex;align-items:baseline;gap:6px;margin-right:auto;min-width:0}
@@ -58,9 +59,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn svg{width:18px;height:18px}
 
 .stage{flex:1;min-height:0;position:relative;display:grid;place-items:center;padding-block:4px}
-#cv{display:block;border-radius:6px;background:#000;box-shadow:0 0 0 1px var(--line);touch-action:none}
+#cv{display:block;position:relative;z-index:1;border-radius:6px;background:#000;box-shadow:0 0 0 1px var(--line);touch-action:none}
 #cv.pan{cursor:grab;box-shadow:0 0 0 2px var(--accent)}
-.empty{position:absolute;inset:4px 0;display:grid;place-items:center}
+.empty{position:absolute;inset:4px 0;display:grid;place-items:center;z-index:2;background:var(--bg)}
 .empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:20px;max-width:280px}
 .empty-card h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}
 .empty-card p{margin:0;color:var(--dim);font-size:13px;line-height:1.45}
@@ -97,7 +98,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .zoom{position:absolute;right:6px;top:2px;display:flex;gap:4px;z-index:4}
 .zoom button{width:24px;height:18px;border-radius:5px;border:1px solid var(--line);background:var(--raise);font-family:var(--mono);font-size:12px;line-height:1;padding:0}
 
-.panel{flex:none;max-height:min(230px,36vh);overflow-y:auto;margin-top:8px;border-radius:12px;background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:12px}
+.app.panel-open .tlwrap{height:132px}
+.panel{flex:none;max-height:42%;overflow-y:auto;margin-top:8px;border-radius:12px;background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lbl{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--dim)}
 .sec{display:flex;flex-direction:column;gap:8px}
@@ -132,8 +134,10 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
 .card video{width:100%;max-height:46vh;border-radius:8px;background:#000}
 .card .row .btn{flex:1}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);font-size:13px;font-weight:600;padding:9px 14px;border-radius:10px;z-index:30;max-width:calc(100% - 32px);text-align:center}
-#vhost{position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:.01;pointer-events:none}
-#vhost video,#vhost audio{width:2px;height:2px}
+/* los videos van visibles detrás del lienzo: iOS pausa los videos mudos que no se ven en pantalla */
+#vhost{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;overflow:hidden;pointer-events:none;z-index:0;border-radius:6px;background:#000}
+#vhost video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.diag{font:11px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;background:var(--raise);padding:10px;border-radius:8px;max-height:50vh;overflow:auto;-webkit-user-select:text;user-select:text;margin:0}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -146,6 +150,7 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
   </header>
 
   <section class="stage" id="stage">
+    <div id="vhost"></div>
     <canvas id="cv" width="720" height="1280"></canvas>
     <div class="empty" id="empty">
       <div class="empty-card">
@@ -196,7 +201,6 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
 <input type="file" id="fileOI" accept="image/*" hidden>
 <input type="file" id="fileOV" accept="video/*" hidden>
 <input type="file" id="fileAI" accept="image/*" multiple hidden>
-<div id="vhost"></div>
 <div class="modal" id="modal" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
@@ -229,6 +233,9 @@ const S={clips:[],texts:[],marks:[],overlays:[],subs:{mode:'script',fix:{},scrip
 const sources={}, imgs={}; let music=null, selOv=null;
 let pps=60, curT=0, playing=false, activeIdx=-1, selClip=-1, selText=null, tab=null, exporting=false, busy=false;
 let hist=[], actx=null, A={}, recDest=null, dlNS=null, lastProg=-1, wake=null;
+const errLog=[];
+window.addEventListener('error',e=>errLog.push('error: '+(e.message||'')+(e.lineno?' (línea '+e.lineno+')':'')));
+window.addEventListener('unhandledrejection',e=>errLog.push('promesa: '+(e.reason&&e.reason.message||e.reason)));
 const uid=()=>Math.random().toString(36).slice(2,9);
 const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 
@@ -873,7 +880,13 @@ function drawTexts(t){
     });ctx.restore()}
 }
 function setDims(){const[a,b]=AR[S.aspect],r=S.res;let W,H;if(a<=b){W=r;H=Math.round(r*b/a/2)*2}else{H=r;W=Math.round(r*a/b/2)*2}if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H}layout()}
-function layout(){const st=$('#stage'),sw=st.clientWidth,sh=st.clientHeight-8;if(sw<=0||sh<=0)return;const sc=Math.min(sw/cv.width,sh/cv.height);cv.style.width=Math.floor(cv.width*sc)+'px';cv.style.height=Math.floor(cv.height*sc)+'px'}
+function fitApp(){
+  const standalone=window.navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  let h=window.innerHeight;
+  if(standalone&&Math.abs(window.innerWidth-screen.width)<4&&screen.height>h)h=screen.height;/* iPhone instalado: usa toda la pantalla */
+  document.documentElement.style.setProperty('--app-h',h+'px');
+}
+function layout(){fitApp();const st=$('#stage'),sw=st.clientWidth,sh=st.clientHeight-8;if(sw<=0||sh<=0)return;const sc=Math.min(sw/cv.width,sh/cv.height),w=Math.floor(cv.width*sc)+'px',h=Math.floor(cv.height*sc)+'px';cv.style.width=w;cv.style.height=h;const vh=$('#vhost');vh.style.width=w;vh.style.height=h}
 
 /* ---------- timeline ---------- */
 function renderTL(){
@@ -925,8 +938,13 @@ function startVideo(loc){
   v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>0.03)v.currentTime=loc.src;
   const p=v.play();if(p)p.catch(()=>{});
 }
+let stall={t:-1,since:0};
 function syncVideo(loc){
-  const c=S.clips[loc.i],v=sources[c.src].el;if(v.seeking)return;
+  const c=S.clips[loc.i],v=sources[c.src].el;
+  /* vigilante: si el video deja de avanzar, lo vuelvo a arrancar y lo anoto para el diagnóstico */
+  const now=performance.now();if(Math.abs(v.currentTime-stall.t)>0.001){stall={t:v.currentTime,since:now}}
+  else if(now-stall.since>1500){stall.since=now;errLog.push('video sin avanzar ('+sources[c.src].name+', ready '+v.readyState+', paused '+v.paused+')');try{v.play().catch(()=>{})}catch(e){}}
+  if(v.seeking)return;
   if(Math.abs(v.currentTime-loc.src)>0.25)v.currentTime=Math.min(c.out-0.01,loc.src+0.04*c.speed);
   else if(v.paused){const p=v.play();if(p)p.catch(()=>{})}
 }
@@ -937,6 +955,10 @@ function play(until){
   if(curT>=total()-0.05)curT=0;
   playUntil=typeof until==='number'?until:-1;
   playing=true;activeIdx=-1;setPlayIco();const tok=++playTok;
+  /* iOS: el primer play de cada video debe salir directo del toque */
+  Object.values(sources).forEach(s=>{if(s._gest)return;s._gest=true;const p=s.el.play();if(p)p.then(()=>{const c=S.clips[activeIdx];if(s.ov||!(playing&&c&&sources[c.src]===s))s.el.pause()}).catch(()=>{s._gest=false})});
+  const loc0=locate(curT);if(loc0){activeIdx=loc0.i;startVideo(loc0)}
+  stall={t:-1,since:0};
   prepareAudio().then(async()=>{
     if(!playing||tok!==playTok)return;
     if(actx&&actx.state!=='running'){try{await Promise.race([actx.resume(),new Promise(r=>setTimeout(r,600))])}catch(e){}}
@@ -1063,7 +1085,7 @@ function addText(kind){
 const chip=(act,v,label,on,cls='')=>`<button class="chip${on?' on':''}${cls?' '+cls:''}" data-act="${act}" data-v="${v}">${label}</button>`;
 const field=(key,label,min,max,step,val,disp)=>`<label class="field"><span>${label}</span><input type="range" id="in-${key}" data-in="${key}" min="${min}" max="${max}" step="${step}" value="${val}"><output id="out-${key}">${disp}</output></label>`;
 function renderPanel(){
-  panel.hidden=!tab;cv.classList.toggle('pan',(tab==='zoom'||tab==='capas')&&S.clips.length>0);
+  panel.hidden=!tab;$('.app').classList.toggle('panel-open',!!tab);cv.classList.toggle('pan',(tab==='zoom'||tab==='capas')&&S.clips.length>0);
   if(!tab){layoutSoon();return}
   let h='';const noClips='<p class="note">Importa clips con el botón + para empezar.</p>';
   if(tab==='editar'){
@@ -1234,6 +1256,23 @@ function onRecStop(){
 /* ---------- toast ---------- */
 let tt=0;function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2400)}
 
+/* ---------- diagnóstico: deja presionado el logo "Corte." ---------- */
+let lp=0;const brandEl=$('.brand');
+brandEl.addEventListener('pointerdown',()=>{clearTimeout(lp);lp=setTimeout(showDiag,800)});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>brandEl.addEventListener(ev,()=>clearTimeout(lp)));
+function showDiag(){
+  const L=[];L.push('Corte · '+navigator.userAgent);
+  L.push('pantalla '+screen.width+'×'+screen.height+' · ventana '+innerWidth+'×'+innerHeight+' · alto app '+(getComputedStyle(document.documentElement).getPropertyValue('--app-h')||'—'));
+  L.push('audio '+(actx?actx.state+' '+actx.sampleRate+' Hz':'sin iniciar')+' · reloj '+(clock?(clock.ctx?'audio':'tiempo'):'—')+' · curT '+curT.toFixed(2)+' · reproduciendo '+playing);
+  Object.values(sources).forEach(s=>{const v=s.el;L.push('• '+s.name+' '+(s.file.size/1e6).toFixed(1)+' MB '+(s.file.type||'?')+' | '+v.videoWidth+'×'+v.videoHeight+' '+s.dur.toFixed(1)+' s | ready '+v.readyState+' net '+v.networkState+' paused '+v.paused+' t '+v.currentTime.toFixed(2)+' seeking '+v.seeking+(v.error?' error '+v.error.code:'')+' | audio '+(s.buf?'ok '+s.buf.duration.toFixed(1)+' s':(s.bufErr||'—')))});
+  if(errLog.length)L.push('avisos: '+errLog.slice(-6).join(' / '));
+  const txt=L.join('\n');
+  modal(`<h2>Diagnóstico</h2><pre class="diag">${esc(txt)}</pre><div class="row"><button class="btn" id="mClose">Cerrar</button><button class="btn primary" id="dCopy">Copiar</button></div>`);
+  $('#mClose').onclick=closeModal;
+  $('#dCopy').onclick=()=>{try{navigator.clipboard.writeText(txt).then(()=>toast('Copiado'),()=>toast('Mantén presionado el texto para copiarlo'))}catch(e){toast('Mantén presionado el texto para copiarlo')}};
+}
+
+window.addEventListener('orientationchange',()=>setTimeout(layoutSoon,300));
 setDims();refresh(false);draw();
 })();
 </script>
