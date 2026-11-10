@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="10nov-0923">
+<meta name="corte-build" content="10nov-0934">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -230,7 +230,7 @@ const TEXT_PRESETS={
 const NOISE={off:{hp:20,lp:20000,g:0},bajo:{hp:70,lp:12000,g:.5},medio:{hp:90,lp:9500,g:.75},alto:{hp:115,lp:8000,g:.95}};
 const SENS={suave:{k:.18,min:.7,pad:.14},normal:{k:.26,min:.45,pad:.1},agresivo:{k:.34,min:.3,pad:.07}};
 
-const S={clips:[],texts:[],marks:[],overlays:[],subs:{mode:'script',fix:{},script:'',words:[],style:'karaoke',y:64,size:7,hl:'#f2b544',max:3,offset:0,caps:false,hash:''},filt:{...FILTERS[0]},fit:'cover',bg:'#000000',aspect:'9:16',res:720,origVol:1,musicVol:0.6,musicOffset:0,noise:'off',voice:false,sens:'normal'};
+const S={clips:[],texts:[],marks:[],overlays:[],subs:{mode:'script',fix:{},script:'',words:[],style:'karaoke',y:64,size:7,hl:'#f2b544',max:3,offset:0,caps:false,hash:''},filt:{...FILTERS[0]},fit:'cover',bg:'#000000',aspect:'9:16',res:720,origVol:1,avOffset:0,musicVol:0.6,musicOffset:0,noise:'off',voice:false,sens:'normal'};
 const sources={}, imgs={}; let music=null, selOv=null;
 let pps=60, curT=0, playing=false, activeIdx=-1, selClip=-1, selText=null, tab=null, exporting=false, busy=false;
 let hist=[], actx=null, A={}, recDest=null, dlNS=null, lastProg=-1, wake=null;
@@ -342,15 +342,17 @@ function scheduleAudio(fromT){
     const n=actx.createBufferSource(),g=actx.createGain();n.buffer=buf;
     g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+0.008);g.gain.setValueAtTime(1,Math.max(when+0.008,when+dur-0.01));g.gain.linearRampToValueAtTime(0,when+dur);
     n.connect(g);g.connect(bus);n.start(when,Math.max(0,off),dur);sched.push(n)};
+  const avo=(S.avOffset||0)/1000;
+  const putV=(buf,when,off,dur)=>{when+=avo;if(when<t0){const k=t0-when;off+=k;dur-=k;when=t0}put(buf,when,off,dur,A.clipBus)};
   let st=0;S.clips.forEach(c=>{const d=cDur(c),en=st+d,s=sources[c.src];
     if(!c.mute&&s&&en>fromT){const from=Math.max(fromT,st),buf=c.speed===1?s.buf:(s.str&&s.str[c.speed]);
-      put(buf,t0+(from-fromT),(c.in+(from-st)*c.speed)/c.speed,en-from,A.clipBus)}st=en});
+      putV(buf,t0+(from-fromT),(c.in+(from-st)*c.speed)/c.speed,en-from)}st=en});
   S.overlays.forEach(o=>{if(o.kind!=='video'||o.mute||o.end<=fromT)return;const s=sources[o.src];if(!s)return;const from=Math.max(fromT,o.start);
-    put(s.buf,t0+(from-fromT),o.in+(from-o.start),o.end-from,A.clipBus)});
+    putV(s.buf,t0+(from-fromT),o.in+(from-o.start),o.end-from)});
   if(music&&music.buf)put(music.buf,t0,S.musicOffset+fromT,T-fromT,A.musicBus);
 }
 /* lo que se oye va atrasado por la latencia de salida (mucho más con audífonos Bluetooth); el video la sigue */
-function outLat(){if(!actx||exporting)return 0;return Math.min(0.5,(actx.outputLatency||0)+(actx.baseLatency||0))}
+function outLat(){if(!actx||exporting)return 0;const l=(actx.outputLatency||0)+(actx.baseLatency||0);return l>0&&l<0.4?l:0}
 function nowT(){if(!clock)return curT;return clock.curT0+(clock.ctx?Math.max(0,actx.currentTime-outLat()-clock.ctxT0):(performance.now()-clock.perf0)/1000)}
 function startClock(){if(actx&&actx.state==='running')scheduleAudio(curT);else clock={ctx:false,perf0:performance.now(),curT0:curT}}
 
@@ -414,6 +416,12 @@ async function demuxAac(f){
   for(const trak of boxes(moov,8,moov.byteLength).filter(b=>b.t==='trak')){
     const mdia=kid(moov,trak,'mdia');if(!mdia)continue;const hdlr=kid(moov,mdia,'hdlr');if(!hdlr||fcc(moov,hdlr.s+8)!=='soun')continue;
     const minf=kid(moov,mdia,'minf'),stbl=minf&&kid(moov,minf,'stbl'),stsd=stbl&&kid(moov,stbl,'stsd');if(!stsd)continue;
+    let delay=0,skip=0;try{/* lista de edición: silencio inicial y muestras a saltar (retraso del codificador AAC) */
+      const ts=b=>{const v=moov.getUint8(b.s);return moov.getUint32(b.s+(v===1?20:12))};
+      const mvhd=kid(moov,{s:8,e:moov.byteLength},'mvhd'),mdhd=kid(moov,mdia,'mdhd'),edts=kid(moov,trak,'edts'),elst=edts&&kid(moov,edts,'elst');
+      if(elst&&mvhd&&mdhd){const mvTs=ts(mvhd),mdTs=ts(mdhd),v1=moov.getUint8(elst.s)===1,n=moov.getUint32(elst.s+4);let o=elst.s+8;
+        for(let k=0;k<n;k++){const dur=v1?Number(moov.getBigUint64(o)):moov.getUint32(o),mt=v1?Number(moov.getBigInt64(o+8)):moov.getInt32(o+4);o+=v1?20:12;
+          if(mt===-1){delay+=dur/mvTs;continue}skip=mt/mdTs;break}}}catch(e){delay=0;skip=0}
     const ent=boxes(moov,stsd.s+8,stsd.e)[0];if(!ent||ent.t!=='mp4a')continue;
     const eb=new Uint8Array(moov.buffer,moov.byteOffset+ent.s,ent.e-ent.s);let asc=null;
     for(let i=0;i+4<eb.length;i++)if(eb[i]===0x65&&eb[i+1]===0x73&&eb[i+2]===0x64&&eb[i+3]===0x73){asc=parseEsds(eb.subarray(i+4));break}
@@ -433,7 +441,7 @@ async function demuxAac(f){
     for(let i=0;i<chunks.length;i+=8){const part=chunks.slice(i,i+8),bufs=await Promise.all(part.map(c=>f.slice(c.o,c.o+c.tot).arrayBuffer()));
       part.forEach((c,j)=>{let p=0;const u=new Uint8Array(bufs[j]);c.sizes.forEach(z=>{frames.push(u.subarray(p,p+z));p+=z})})}
     if(!frames.length)continue;
-    return{frames,asc,obj,sr,fi,ch};
+    return{frames,asc,obj,sr,fi,ch,delay,skip};
   }
   return null}
 function adtsBlob(t){const parts=[];for(const fr of t.frames){const len=fr.length+7,h=new Uint8Array(7),pr=t.obj-1;
@@ -450,12 +458,17 @@ async function webcodecsDecode(t,sr){
   const n=out.reduce((a,x)=>a+x[0].length,0),O=OACx(),src=new O(nch,n,rate).createBuffer(nch,n,rate);
   for(let c=0;c<nch;c++){const d=src.getChannelData(c);let p=0;out.forEach(x=>{d.set(x[Math.min(c,x.length-1)],p);p+=x[0].length})}
   const oc=new O(1,Math.ceil(n*sr/rate),sr),bs=oc.createBufferSource();bs.buffer=src;bs.connect(oc.destination);bs.start();return oc.startRendering()}
+function shiftBuf(b,sh){/* sh>0: retrasa el audio (silencio al inicio); sh<0: recorta el inicio */
+  const n=Math.round(Math.abs(sh)*b.sampleRate);if(!n)return b;const len=sh>0?b.length+n:Math.max(1,b.length-n);
+  const nb=new AudioBuffer({length:len,numberOfChannels:b.numberOfChannels,sampleRate:b.sampleRate});
+  for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);if(sh>0)nb.copyToChannel(d,c,n);else nb.copyToChannel(d.subarray(n),c,0)}return nb}
 async function decodeAudio(s,sr){
   const O=OACx(),ctx=()=>new O(1,sr,sr);
   if(s.aac===undefined){try{s.aac=await demuxAac(s.file)}catch(e){s.aac=null}}
   if(s.aac){
-    try{return await decodeBuf(ctx(),await adtsBlob(s.aac).arrayBuffer())}catch(e){}
-    try{return await webcodecsDecode(s.aac,sr)}catch(e){}
+    const sh=(s.aac.delay||0)-(s.aac.skip||0);
+    try{return shiftBuf(await decodeBuf(ctx(),await adtsBlob(s.aac).arrayBuffer()),sh)}catch(e){}
+    try{return shiftBuf(await webcodecsDecode(s.aac,sr),sh)}catch(e){}
   }
   try{return await decodeBuf(ctx(),await s.file.arrayBuffer())}
   catch(e){throw new Error(s.aac?'No pude decodificar el audio de "'+s.name+'"':'"'+s.name+'" no tiene audio que pueda leer')}
@@ -944,22 +957,22 @@ function showFrame(){syncOv();const loc=locate(curT);if(!loc){draw();return}cons
    - Cada archivo tiene dos reproductores (A/B). Mientras suena un corte, el otro ya está esperando en el inicio del
      siguiente, así el salto entre cortes es instantáneo (en iPhone un salto dentro del video tarda en llegar).
    - Dentro de un corte, el desfase se corrige acelerando o frenando el video un poco, sin saltos. */
-let curEl=null,prepared=null,rateT=0;
+let curEl=null,prepared=null,rateT=0,lead=0.06,switchAt=0,measured=true;/* lead: lo que tarda un reproductor en arrancar; se aprende en cada corte */
 function mkEl(s){const v=document.createElement('video');v.muted=true;v.defaultMuted=true;v.setAttribute('muted','');v.playsInline=true;v.setAttribute('playsinline','');v.preload='auto';v.src=s.url;$('#vhost').appendChild(v);v.load();return v}
 function otherEl(s,v){if(v===s.el){if(!s.el2)s.el2=mkEl(s);return s.el2}return s.el}
 function elFor(i){return playing&&i===activeIdx&&curEl?curEl:sources[S.clips[i].src].el}
 function prepareNext(i){
   prepared=null;const n=i+1;if(n>=S.clips.length)return;const c=S.clips[n],s=sources[c.src];if(!s)return;
   const v=(curEl&&s===sources[S.clips[i].src])?otherEl(s,curEl):(curEl===s.el?otherEl(s,curEl):s.el);
-  if(!v.paused)v.pause();v.playbackRate=c.speed;if(Math.abs(v.currentTime-c.in)>0.02)v.currentTime=c.in;prepared={n,v};
+  const tgt=Math.min(c.out-0.02,c.in+lead*c.speed);if(!v.paused)v.pause();v.playbackRate=c.speed;if(Math.abs(v.currentTime-tgt)>0.02)v.currentTime=tgt;prepared={n,v};
 }
 function startVideo(loc){
   const c=S.clips[loc.i],s=sources[c.src];
-  let v=prepared&&prepared.n===loc.i?prepared.v:(curEl&&(curEl===s.el||curEl===s.el2)?curEl:s.el);
+  const pre=!!(prepared&&prepared.n===loc.i);let v=pre?prepared.v:(curEl&&(curEl===s.el||curEl===s.el2)?curEl:s.el);
   if(curEl&&curEl!==v&&!curEl.paused)curEl.pause();
   Object.values(sources).forEach(x=>[x.el,x.el2].forEach(e=>{if(e&&e!==v&&!x.ov&&!e.paused&&!(prepared&&e===prepared.v))e.pause()}));
-  v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>0.08)v.currentTime=loc.src;
-  const p=v.play();if(p)p.catch(()=>{});curEl=v;stall={t:-1,since:0};
+  v.playbackRate=c.speed;if(Math.abs(v.currentTime-loc.src)>(pre?0.45:0.08))v.currentTime=loc.src+(pre?0:lead*c.speed);
+  const p=v.play();if(p)p.catch(()=>{});curEl=v;stall={t:-1,since:0};switchAt=performance.now();measured=false;
   prepareNext(loc.i);
 }
 let stall={t:-1,since:0};
@@ -970,9 +983,10 @@ function syncVideo(loc){
   else if(now-stall.since>1500){stall.since=now;errLog.push('video sin avanzar ('+sources[c.src].name+', ready '+v.readyState+', paused '+v.paused+')');try{v.play().catch(()=>{})}catch(e){}}
   if(v.seeking)return;
   const d=v.currentTime-loc.src;/* >0: el video va adelantado */
-  if(Math.abs(d)>0.6){v.playbackRate=c.speed;v.currentTime=Math.min(c.out-0.01,loc.src+0.12*c.speed);return}
+  if(!measured&&now-switchAt>300){measured=true;lead=cl(lead-d*0.6,0,0.35)}/* aprendo cuánto tarda en arrancar */
+  if(Math.abs(d)>0.8){v.playbackRate=c.speed;v.currentTime=Math.min(c.out-0.01,loc.src+Math.max(0.12,lead)*c.speed);return}
   if(v.paused){const p=v.play();if(p)p.catch(()=>{})}
-  if(now-rateT>200){rateT=now;const want=Math.abs(d)<0.03?c.speed:c.speed*cl(1-d*1.6,0.8,1.25);if(Math.abs(v.playbackRate-want)>0.015)v.playbackRate=want}
+  if(now-rateT>200){rateT=now;const want=Math.abs(d)<0.025?c.speed:c.speed*cl(1-d*2.2,0.75,1.4);if(Math.abs(v.playbackRate-want)>0.015)v.playbackRate=want}
 }
 let playUntil=-1;
 function unlockEls(){/* iOS: el primer play de cada reproductor debe salir directo de un toque */
@@ -1145,7 +1159,10 @@ function renderPanel(){
       <div class="sec"><span class="lbl">Velocidad</span><div class="row">${SPEEDS.map(s=>chip('speed',s,s+'×',c.speed===s)).join('')}</div></div>
       ${selClip>0?`<div class="sec"><span class="lbl">Transición al entrar a este clip</span><div class="row">${Object.keys(TR_NAMES).map(t=>chip('tr',t,TR_NAMES[t],(c.tr||'none')===t)).join('')}</div><p class="note">Al elegir una, te la muestro en el video.</p></div>`:''}`}
   }else if(tab==='audio'){
+    const avTxt=v=>(v>0?'+':'')+v+' ms';
     h=`<div class="sec"><span class="lbl">Voz</span>${field('origVol','Volumen',0,300,5,Math.round(S.origVol*100),Math.round(S.origVol*100)+'%')}
+      ${field('avOffset','Sincronía',-400,400,10,S.avOffset||0,avTxt(S.avOffset||0))}
+      <p class="note">Si la voz llega antes que los labios, mueve Sincronía a la derecha (+). Si llega después, a la izquierda (−). Se aplica también al exportar.</p>
       <div class="row"><span class="note" style="min-width:96px">Reducir ruido</span>${chip('noise','off','No',S.noise==='off')}${chip('noise','bajo','Bajo',S.noise==='bajo')}${chip('noise','medio','Medio',S.noise==='medio')}${chip('noise','alto','Alto',S.noise==='alto')}</div>
       <div class="row"><span class="note" style="min-width:96px">Mejorar voz</span>${chip('voice','0','No',!S.voice)}${chip('voice','1','Sí',S.voice)}</div>
       <p class="note">Reducir ruido quita zumbido, aire y ruido entre frases. Mejorar voz le da claridad y presencia y empareja el volumen. Se aplica al reproducir y al exportar.</p></div>
@@ -1218,6 +1235,7 @@ panel.addEventListener('input',e=>{
     case 'suboff':S.subs.offset=v;out.textContent=(v>0?'+':'')+v.toFixed(2)+'s';buildSubs();break;
     case 'tsize':t.size=v;out.textContent=v;break;
     case 'ty':t.y=v;out.textContent=v+'%';break;
+    case 'avOffset':S.avOffset=v;out.textContent=(v>0?'+':'')+v+' ms';if(playing&&clock&&clock.ctx){curT=nowT();scheduleAudio(curT)}break;
     case 'origVol':S.origVol=v/100;out.textContent=v+'%';if(A.clipBus)A.clipBus.gain.value=S.origVol;break;
     case 'musicVol':S.musicVol=v/100;out.textContent=v+'%';if(A.musicBus)A.musicBus.gain.value=S.musicVol;break;
     case 'musicOffset':S.musicOffset=v;out.textContent=short(v);if(playing&&clock&&clock.ctx){curT=nowT();scheduleAudio(curT)}break;
@@ -1303,6 +1321,8 @@ brandEl.addEventListener('pointerdown',()=>{clearTimeout(lp);lp=setTimeout(showD
 function showDiag(){
   const L=[];const ver=document.querySelector('meta[name=corte-build]');L.push('Corte versión '+(ver?ver.content:'web')+' · '+navigator.userAgent);
   L.push('pantalla '+screen.width+'×'+screen.height+' · ventana '+innerWidth+'×'+innerHeight+' · visible '+(window.visualViewport?Math.round(visualViewport.height):'—')+' · alto app '+(getComputedStyle(document.documentElement).getPropertyValue('--app-h')||'—')+' · instalada '+isStandalone()+' · margen sup '+Math.round(safeTop())+' · app abajo '+Math.round($('.app').getBoundingClientRect().bottom));
+  {const l=locate(playing&&clock?Math.min(total(),nowT()):curT);const v=l?elFor(l.i):null;L.push('latencia salida '+Math.round((actx&&actx.outputLatency||0)*1000)+' ms + base '+Math.round((actx&&actx.baseLatency||0)*1000)+' ms · compenso '+Math.round(outLat()*1000)+' ms · ajuste manual '+(S.avOffset||0)+' ms'+(playing&&v&&l?' · desfase ahora '+Math.round((v.currentTime-l.src)*1000)+' ms (positivo = video adelantado)':''));
+    Object.values(sources).forEach(s=>{if(s.aac)L.push('• '+s.name+': audio retrasado '+Math.round((s.aac.delay||0)*1000)+' ms, salto inicial '+Math.round((s.aac.skip||0)*1000)+' ms')})}
   L.push('audio '+(actx?actx.state+' '+actx.sampleRate+' Hz':'sin iniciar')+' · reloj '+(clock?(clock.ctx?'audio':'tiempo'):'—')+' · curT '+curT.toFixed(2)+' · reproduciendo '+playing);
   Object.values(sources).forEach(s=>{const v=s.el;L.push('• '+s.name+' '+(s.file.size/1e6).toFixed(1)+' MB '+(s.file.type||'?')+' | '+v.videoWidth+'×'+v.videoHeight+' '+s.dur.toFixed(1)+' s | ready '+v.readyState+' net '+v.networkState+' paused '+v.paused+' t '+v.currentTime.toFixed(2)+' seeking '+v.seeking+(v.error?' error '+v.error.code:'')+' | audio '+(s.buf?'ok '+s.buf.duration.toFixed(1)+' s':(s.bufErr||'—')))});
   if(errLog.length)L.push('avisos: '+errLog.slice(-6).join(' / '));
@@ -1312,7 +1332,7 @@ function showDiag(){
   $('#dCopy').onclick=()=>{try{navigator.clipboard.writeText(txt).then(()=>toast('Copiado'),()=>toast('Mantén presionado el texto para copiarlo'))}catch(e){toast('Mantén presionado el texto para copiarlo')}};
 }
 
-window.__corte={state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
+window.__corte={state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{lead,playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
 window.addEventListener('orientationchange',()=>setTimeout(layoutSoon,300));
 setDims();refresh(false);draw();
 })();
