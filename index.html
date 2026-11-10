@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
+<meta name="corte-build" content="10nov-0915">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -62,7 +63,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #cv{display:block;position:relative;z-index:1;border-radius:6px;background:#000;box-shadow:0 0 0 1px var(--line);touch-action:none}
 #cv.pan{cursor:grab;box-shadow:0 0 0 2px var(--accent)}
 .empty{position:absolute;inset:4px 0;display:grid;place-items:center;z-index:2;background:var(--bg)}
-.empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:20px;max-width:280px}
+.empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:20px;max-width:min(300px,92%)}
 .empty-card h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}
 .empty-card p{margin:0;color:var(--dim);font-size:13px;line-height:1.45}
 .empty-card .btn{height:44px;padding:0 20px;font-size:15px}
@@ -1205,7 +1206,7 @@ function refresh(withPanel){
   curT=cl(curT,0,total());
   if(S.subs.script&&S.subs.hash!==clipHash())buildSubs();
   const has=S.clips.length>0;
-  $('#empty').hidden=has;$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;$('#autoBtn').disabled=!has;
+  $('#empty').hidden=has;cv.style.visibility=$('#vhost').style.visibility=has?'visible':'hidden';$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;$('#autoBtn').disabled=!has;
   $('#durLbl').textContent=has?`${S.clips.length} clip${S.clips.length>1?'s':''} · ${short(total())}`:'sin clips';
   renderTL();if(withPanel)renderPanel();showFrame();updTime();
 }
@@ -1266,7 +1267,7 @@ let lp=0;const brandEl=$('.brand');
 brandEl.addEventListener('pointerdown',()=>{clearTimeout(lp);lp=setTimeout(showDiag,800)});
 ['pointerup','pointercancel','pointerleave'].forEach(ev=>brandEl.addEventListener(ev,()=>clearTimeout(lp)));
 function showDiag(){
-  const L=[];L.push('Corte · '+navigator.userAgent);
+  const L=[];const ver=document.querySelector('meta[name=corte-build]');L.push('Corte versión '+(ver?ver.content:'web')+' · '+navigator.userAgent);
   L.push('pantalla '+screen.width+'×'+screen.height+' · ventana '+innerWidth+'×'+innerHeight+' · visible '+(window.visualViewport?Math.round(visualViewport.height):'—')+' · alto app '+(getComputedStyle(document.documentElement).getPropertyValue('--app-h')||'—')+' · instalada '+isStandalone()+' · margen sup '+Math.round(safeTop())+' · app abajo '+Math.round($('.app').getBoundingClientRect().bottom));
   L.push('audio '+(actx?actx.state+' '+actx.sampleRate+' Hz':'sin iniciar')+' · reloj '+(clock?(clock.ctx?'audio':'tiempo'):'—')+' · curT '+curT.toFixed(2)+' · reproduciendo '+playing);
   Object.values(sources).forEach(s=>{const v=s.el;L.push('• '+s.name+' '+(s.file.size/1e6).toFixed(1)+' MB '+(s.file.type||'?')+' | '+v.videoWidth+'×'+v.videoHeight+' '+s.dur.toFixed(1)+' s | ready '+v.readyState+' net '+v.networkState+' paused '+v.paused+' t '+v.currentTime.toFixed(2)+' seeking '+v.seeking+(v.error?' error '+v.error.code:'')+' | audio '+(s.buf?'ok '+s.buf.duration.toFixed(1)+' s':(s.bufErr||'—')))});
@@ -1292,7 +1293,7 @@ setDims();refresh(false);draw();
   const wasControlled=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('message',e=>{const d=e.data||{};
     if(d.type==='progress'&&!wasControlled)show('Preparando modo sin internet… '+Math.round(d.p*100)+'%');
-    else if(d.type==='ready')show(wasControlled?'Corte se actualizó':'Listo: Corte ya funciona sin internet',4000);
+    else if(d.type==='ready')show(wasControlled?'Versión nueva lista: cierra y vuelve a abrir Corte':'Listo: Corte ya funciona sin internet',wasControlled?8000:4000);
     else if(d.type==='failed'&&!wasControlled)show('No terminé de guardar la app. Ábrela otra vez con WiFi.',6000)});
   window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});
     try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}});
