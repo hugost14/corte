@@ -38,7 +38,7 @@ body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--ui);over
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* la app ocupa la pantalla completa (en iPhone instalado, 100% se queda corto y deja un hueco abajo) */
-.app{position:fixed;top:0;left:0;right:0;height:var(--app-h,100%);max-width:560px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:max(6px,env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.app{position:fixed;top:0;left:0;right:0;height:var(--app-h,100dvh);max-width:560px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:max(6px,env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 
 .top{display:flex;align-items:center;gap:8px;padding-block:8px}
 .brand{display:flex;align-items:baseline;gap:6px;margin-right:auto;min-width:0}
@@ -880,10 +880,15 @@ function drawTexts(t){
     });ctx.restore()}
 }
 function setDims(){const[a,b]=AR[S.aspect],r=S.res;let W,H;if(a<=b){W=r;H=Math.round(r*b/a/2)*2}else{H=r;W=Math.round(r*a/b/2)*2}if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H}layout()}
+let safeProbe=null;
+function safeTop(){if(!safeProbe){safeProbe=document.createElement('div');safeProbe.style.cssText='position:fixed;top:0;left:0;width:1px;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none';document.body.appendChild(safeProbe)}return safeProbe.getBoundingClientRect().height}
+function isStandalone(){return window.navigator.standalone===true||!!(window.matchMedia&&(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches))}
 function fitApp(){
-  const standalone=window.navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   let h=window.innerHeight;
-  if(standalone&&Math.abs(window.innerWidth-screen.width)<4&&screen.height>h)h=screen.height;/* iPhone instalado: usa toda la pantalla */
+  /* iPhone con la app instalada: el contenido llega hasta debajo de la barra de estado, pero el alto que reporta Safari
+     se queda corto y deja un hueco abajo. En ese caso uso el alto real de la pantalla. */
+  const portrait=screen.height>screen.width,sameW=Math.abs(window.innerWidth-screen.width)<4;
+  if(portrait&&sameW&&(isStandalone()||safeTop()>20)&&screen.height>h)h=screen.height;
   document.documentElement.style.setProperty('--app-h',h+'px');
 }
 function layout(){fitApp();const st=$('#stage'),sw=st.clientWidth,sh=st.clientHeight-8;if(sw<=0||sh<=0)return;const sc=Math.min(sw/cv.width,sh/cv.height),w=Math.floor(cv.width*sc)+'px',h=Math.floor(cv.height*sc)+'px';cv.style.width=w;cv.style.height=h;const vh=$('#vhost');vh.style.width=w;vh.style.height=h}
@@ -1262,7 +1267,7 @@ brandEl.addEventListener('pointerdown',()=>{clearTimeout(lp);lp=setTimeout(showD
 ['pointerup','pointercancel','pointerleave'].forEach(ev=>brandEl.addEventListener(ev,()=>clearTimeout(lp)));
 function showDiag(){
   const L=[];L.push('Corte · '+navigator.userAgent);
-  L.push('pantalla '+screen.width+'×'+screen.height+' · ventana '+innerWidth+'×'+innerHeight+' · alto app '+(getComputedStyle(document.documentElement).getPropertyValue('--app-h')||'—'));
+  L.push('pantalla '+screen.width+'×'+screen.height+' · ventana '+innerWidth+'×'+innerHeight+' · visible '+(window.visualViewport?Math.round(visualViewport.height):'—')+' · alto app '+(getComputedStyle(document.documentElement).getPropertyValue('--app-h')||'—')+' · instalada '+isStandalone()+' · margen sup '+Math.round(safeTop())+' · app abajo '+Math.round($('.app').getBoundingClientRect().bottom));
   L.push('audio '+(actx?actx.state+' '+actx.sampleRate+' Hz':'sin iniciar')+' · reloj '+(clock?(clock.ctx?'audio':'tiempo'):'—')+' · curT '+curT.toFixed(2)+' · reproduciendo '+playing);
   Object.values(sources).forEach(s=>{const v=s.el;L.push('• '+s.name+' '+(s.file.size/1e6).toFixed(1)+' MB '+(s.file.type||'?')+' | '+v.videoWidth+'×'+v.videoHeight+' '+s.dur.toFixed(1)+' s | ready '+v.readyState+' net '+v.networkState+' paused '+v.paused+' t '+v.currentTime.toFixed(2)+' seeking '+v.seeking+(v.error?' error '+v.error.code:'')+' | audio '+(s.buf?'ok '+s.buf.duration.toFixed(1)+' s':(s.bufErr||'—')))});
   if(errLog.length)L.push('avisos: '+errLog.slice(-6).join(' / '));
