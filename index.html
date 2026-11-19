@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="18nov-2306">
+<meta name="corte-build" content="18nov-2340">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -57,7 +57,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .thumb{width:36px;height:48px;border-radius:6px;background:var(--raise) center/cover;flex:none;display:block}
 .blk.s{top:15px;height:7px;padding:0;background:var(--text-track);opacity:.4;pointer-events:none;border-radius:2px}
 .btn:disabled{opacity:.4}
-.btn svg{width:18px;height:18px}
+.btn svg{width:18px;height:18px;flex:none}
+.transport .btn{padding:0 10px;white-space:nowrap;flex:none}
+@media (max-width:419px){.tc span{display:none}}
 
 .stage{flex:1;min-height:0;position:relative;display:grid;place-items:center;padding-block:4px}
 #cv{display:block;position:relative;z-index:1;border-radius:6px;background:#000;box-shadow:0 0 0 1px var(--line);touch-action:none}
@@ -201,6 +203,7 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
   <div class="transport">
     <button class="play" id="playBtn" aria-label="Reproducir"><svg id="playIco" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg></button>
     <div class="tc" id="tc">00:00:00 <span>/ 00:00:00</span></div>
+    <button class="btn" id="kfBtn" disabled aria-label="Agregar fotograma"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M10 3.5 16.5 10 10 16.5 3.5 10z"/><path d="M19 15v6M16 18h6"/></svg>Fotograma</button>
     <button class="btn" id="splitBtn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividir</button>
   </div>
 
@@ -1218,6 +1221,12 @@ function split(){
   commit(()=>{const b=cloneClip(c);b.tr='none';b.in=l.src;c.out=l.src;S.clips.splice(l.i+1,0,b);selClip=l.i+1});toast('Clip dividido');
 }
 $('#splitBtn').onclick=()=>{stop();split()};
+function addKf(){const t=playing&&clock?Math.min(total(),nowT()):curT;stop();curT=t;const l=locate(curT);if(!l)return;const c=S.clips[l.i];
+  if(kfNear(c,l.src)){toast('Ya hay un fotograma aquí: ajústalo con Zoom');openTab('zoom',true);return}
+  const v=kfVal(c,l.src);commit(()=>setKf(c,l.src,{z:v.z,x:v.x,y:v.y}));
+  toast((c.kf.length===1?'Fotograma agregado. Mueve el cabezal y agrega otro para animar el zoom':'Fotograma agregado en '+tc(curT)+'. Cambia el zoom para animar'));
+  if(tab!=='zoom')openTab('zoom',true);else renderPanel();syncScroll();showFrame();updTime()}
+$('#kfBtn').onclick=addKf;
 function act(a,v){
   if(busy)return;stop();
   if(selClip<0||selClip>=S.clips.length)selClip=clipAtHead();
@@ -1252,6 +1261,7 @@ function act(a,v){
     case 'zp':zoomPreset(v);return;
     case 'kprev':jumpKf(-1);return;
     case 'knext':jumpKf(1);return;
+    case 'kadd':addKf();return;
     case 'kdel':{const l=locate(curT);if(!l)return;const cc=S.clips[l.i],k=kfNear(cc,l.src);if(!k)return;commit(()=>{cc.kf=cc.kf.filter(x=>x!==k)});return}
     case 'kclear':{const l=locate(curT);if(!l)return;commit(()=>{S.clips[l.i].kf=[]});toast('Zooms quitados de este clip');return}
     case 'ovimg':case 'ovvid':if(!S.clips.length){toast('Primero importa tu video principal');return}$(a==='ovimg'?'#fileOI':'#fileOV').click();return;
@@ -1376,7 +1386,7 @@ function renderPanel(){
       h=`<div class="sec"><span class="lbl">Zoom rápido en el cabezal</span><div class="row">${chip('zp','in','Acercar suave','','go')}${chip('zp','punch','Golpe de zoom','','go')}${chip('zp','out','Alejar','','go')}</div></div>
       <div class="sec"><span class="lbl">${k?'Fotograma clave en '+tc(curT):'Ajusta y se crea un fotograma aquí'} · clip ${l.i+1} (${n} fotograma${n===1?'':'s'})</span>
       ${field('kz','Zoom',100,300,1,Math.round(v.z*100),Math.round(v.z*100)+'%')}${field('kx','Horizontal',-50,50,1,Math.round(v.x),Math.round(v.x))}${field('ky','Vertical',-50,50,1,Math.round(v.y),Math.round(v.y))}
-      <div class="row">${chip('kprev','','◀ Anterior')}${chip('knext','','Siguiente ▶')}${k?chip('kdel','','Borrar fotograma','','warn'):''}${n?chip('kclear','','Quitar zooms del clip','','warn'):''}</div>
+      <div class="row">${k?'':chip('kadd','','◆ Agregar fotograma','','go')}${chip('kprev','','◀ Anterior')}${chip('knext','','Siguiente ▶')}${k?chip('kdel','','Borrar fotograma','','warn'):''}${n?chip('kclear','','Quitar zooms del clip','','warn'):''}</div>
       <p class="note">Mueve el cabezal, cambia el zoom y se guarda un fotograma (rombo amarillo). Entre dos fotogramas el zoom se anima solo. Arrastra el video para encuadrar.</p></div>`}
   }else if(tab==='filtros'){
     const th=S.clips[0]&&sources[S.clips[0].src].thumb,bgi=th?`background-image:url(${th});`:'';
@@ -1430,7 +1440,7 @@ function refresh(withPanel){
   curT=cl(curT,0,total());
   if(S.subs.script&&S.subs.hash!==clipHash())buildSubs();
   const has=S.clips.length>0;
-  $('#empty').hidden=has;cv.style.visibility=$('#vhost').style.visibility=has?'visible':'hidden';$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;
+  $('#empty').hidden=has;cv.style.visibility=$('#vhost').style.visibility=has?'visible':'hidden';$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;$('#kfBtn').disabled=!has;
   $('#durLbl').textContent=has?`${S.clips.length} clip${S.clips.length>1?'s':''} · ${short(total())}`:'sin clips';
   renderTL();if(withPanel)renderPanel();showFrame();updTime();
 }
@@ -1592,7 +1602,7 @@ function showDiag(){
   $('#dCopy').onclick=()=>{try{navigator.clipboard.writeText(txt).then(()=>toast('Copiado'),()=>toast('Mantén presionado el texto para copiarlo'))}catch(e){toast('Mantén presionado el texto para copiarlo')}};
 }
 
-window.__corte={asr:()=>Object.values(sources).map(s=>s.asr),state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{clips:S.clips.map(c=>({in:c.in,out:c.out})),noise:S.noise,lead,playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
+window.__corte={kf:()=>S.clips.map(c=>(c.kf||[]).length),asr:()=>Object.values(sources).map(s=>s.asr),state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{clips:S.clips.map(c=>({in:c.in,out:c.out})),noise:S.noise,lead,playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
 window.addEventListener('orientationchange',()=>setTimeout(layoutSoon,300));
 setDims();refresh(false);draw();
 })();
