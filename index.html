@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="10nov-0934">
+<meta name="corte-build" content="18nov-2236">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -139,6 +139,40 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
 #vhost{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;overflow:hidden;pointer-events:none;z-index:0;border-radius:6px;background:#000}
 #vhost video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .diag{font:11px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;background:var(--raise);padding:10px;border-radius:8px;max-height:50vh;overflow:auto;-webkit-user-select:text;user-select:text;margin:0}
+/* teleprompter: cámara a pantalla completa con el guion arriba, junto al lente */
+.tp{position:fixed;inset:0;z-index:40;background:#000;color:#fff;overflow:hidden;font-family:var(--ui)}
+#tpCam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#tpCam.mir{transform:scaleX(-1)}
+.tp-top{position:absolute;left:0;right:0;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(env(safe-area-inset-top,0px) + 8px) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px))}
+.tp-ib{width:40px;height:40px;border-radius:50%;border:0;background:rgba(0,0,0,.5);color:#fff;display:grid;place-items:center;padding:0}
+.tp-ib svg{width:20px;height:20px}
+.tp-time{font:600 15px var(--mono);font-variant-numeric:tabular-nums;background:rgba(0,0,0,.5);padding:7px 12px;border-radius:999px;display:flex;gap:7px;align-items:center}
+.tp-time i{width:9px;height:9px;border-radius:50%;background:#ff3b30;display:none}
+.tp.rec .tp-time i{display:block}
+.tp-band{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 58px);height:38%;overflow:hidden;z-index:2;touch-action:none;background:linear-gradient(rgba(0,0,0,.62),rgba(0,0,0,.38));-webkit-mask-image:linear-gradient(transparent,#000 10%,#000 82%,transparent);mask-image:linear-gradient(transparent,#000 10%,#000 82%,transparent)}
+.tp-text{padding:9vh max(22px,7%) 70vh;font-weight:800;line-height:1.3;text-align:center;text-wrap:pretty;white-space:pre-wrap;text-shadow:0 2px 8px rgba(0,0,0,.7);will-change:transform}
+.tp-text.ph{color:rgba(255,255,255,.65);font-weight:600}
+.tp-mark{position:absolute;left:6px;top:calc(9vh + .35em);width:0;height:0;border-left:11px solid var(--accent);border-top:9px solid transparent;border-bottom:9px solid transparent}
+.tp-ctrl{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 16px) max(16px,env(safe-area-inset-left,0px));background:linear-gradient(transparent,rgba(0,0,0,.6) 35%)}
+.tp-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.tp-chip{height:38px;padding:0 14px;border-radius:999px;border:0;background:rgba(0,0,0,.55);color:#fff;font:600 14px var(--ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.tp-chip.on{background:var(--accent);color:var(--accent-ink)}
+.tp-grp{display:inline-flex;align-items:center;background:rgba(0,0,0,.55);border-radius:999px;height:38px}
+.tp-grp button{background:none;border:0;color:#fff;width:36px;height:38px;font:600 18px var(--ui);padding:0}
+.tp-grp span{font:600 12px var(--mono);min-width:52px;text-align:center;white-space:nowrap}
+.tp-recrow{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;width:100%;max-width:420px}
+.tp-recrow>:first-child{justify-self:start}.tp-recrow>:last-child{justify-self:end}
+.tp-rec{width:78px;height:78px;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center;padding:0}
+.tp-rec i{display:block;width:60px;height:60px;border-radius:50%;background:#ff3b30;transition:all .2s}
+.tp.rec .tp-rec i{width:28px;height:28px;border-radius:7px}
+.tp.rec .hide-rec{visibility:hidden}
+.tp-count{position:absolute;inset:0;z-index:4;display:grid;place-items:center;font:800 130px var(--ui);color:#fff;text-shadow:0 4px 24px rgba(0,0,0,.7);pointer-events:none}
+.tp-msg{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 200px);z-index:5;background:rgba(17,18,21,.94);border:1px solid var(--line);border-radius:14px;padding:14px;font-size:14px;line-height:1.45;display:flex;flex-direction:column;gap:12px}
+.tp-msg .row .btn{flex:1}
+.tp-edit{position:absolute;inset:0;z-index:6;background:rgba(10,11,13,.96);display:flex;flex-direction:column;gap:12px;padding:calc(env(safe-area-inset-top,0px) + 16px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 16px) max(16px,env(safe-area-inset-left,0px))}
+.tp-edit h2{margin:0;font-size:20px;font-weight:800}
+.tp-edit textarea{flex:1;min-height:0;font:500 17px/1.5 var(--ui)}
+.tp select{max-width:150px;height:38px;border-radius:999px;border:0;background:rgba(0,0,0,.55);color:#fff;font:600 13px var(--ui);padding:0 10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -146,6 +180,7 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
   <header class="top">
     <div class="brand"><b>Corte<i>.</i></b><span class="dur" id="durLbl">sin clips</span></div>
     <button class="btn icon" id="undoBtn" aria-label="Deshacer" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+    <button class="btn icon" id="recBtn" aria-label="Grabar con teleprompter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5z"/></svg></button>
     <button class="btn icon" id="addBtn" aria-label="Agregar clips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <button class="btn primary" id="exportBtn" disabled>Exportar</button>
   </header>
@@ -158,6 +193,7 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
         <h1>Arma tu video aquí mismo</h1>
         <p>Importa uno o varios clips de tu carrete. Limpia el audio, quita silencios, agrega zooms y textos, y exporta en MP4.</p>
         <button class="btn primary" id="importBtn">Importar clips</button>
+        <button class="btn" id="recBtn2">Grabar con teleprompter</button>
       </div>
     </div>
   </section>
@@ -197,6 +233,36 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
   </nav>
 </div>
 
+<div class="tp" id="tp" hidden>
+  <video id="tpCam" playsinline muted autoplay></video>
+  <div class="tp-band" id="tpBand"><div class="tp-text" id="tpText"></div><i class="tp-mark"></i></div>
+  <div class="tp-top">
+    <button class="tp-ib hide-rec" id="tpClose" aria-label="Cerrar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <div class="tp-time"><i></i><span id="tpTime">0:00</span></div>
+    <button class="tp-ib hide-rec" id="tpFlip" aria-label="Cambiar de cámara"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button>
+  </div>
+  <div class="tp-count" id="tpCount" hidden></div>
+  <div class="tp-msg" id="tpMsg" hidden></div>
+  <div class="tp-ctrl">
+    <div class="tp-row">
+      <button class="tp-chip hide-rec" id="tpEditBtn">Guion</button>
+      <span class="tp-grp"><button id="tpSlow" aria-label="Más lento">−</button><span id="tpSpd">vel 5</span><button id="tpFast" aria-label="Más rápido">+</button></span>
+      <span class="tp-grp"><button id="tpSmall" aria-label="Letra más chica">A−</button><span id="tpSz">34</span><button id="tpBig" aria-label="Letra más grande">A+</button></span>
+    </div>
+    <div class="tp-recrow">
+      <button class="tp-chip" id="tpScrollBtn">▶ Probar</button>
+      <button class="tp-rec" id="tpRec" aria-label="Grabar"><i></i></button>
+      <span class="hide-rec"><button class="tp-chip" id="tpTop">↑ Inicio</button></span>
+    </div>
+    <select id="tpMic" class="hide-rec" hidden aria-label="Micrófono"></select>
+  </div>
+  <div class="tp-edit" id="tpEdit" hidden>
+    <h2>Tu guion</h2>
+    <p class="note">Escribe o pega lo que vas a decir. Una idea por línea se lee mejor.</p>
+    <textarea id="tpScript" placeholder="Ejemplo: Nadie me había dicho que la proteína podía saber a galleta…"></textarea>
+    <div class="row"><button class="btn" id="tpUseAu" hidden>Usar el guion de Auto UGC</button><button class="btn primary" id="tpEditDone" style="margin-left:auto">Listo</button></div>
+  </div>
+</div>
 <input type="file" id="fileV" accept="video/*" multiple hidden>
 <input type="file" id="fileA" accept="audio/*,video/*" hidden>
 <input type="file" id="fileOI" accept="image/*" hidden>
@@ -373,7 +439,9 @@ function loadSource(f){return new Promise((res,rej)=>{
   v.addEventListener('seeked',()=>{if(!playing&&!exporting&&!busy)draw()});
   v.onerror=()=>rej();
   v.onloadedmetadata=async()=>{
-    s.dur=isFinite(v.duration)?v.duration:0;if(!s.dur){rej();return}
+    let d=v.duration;
+    if(!isFinite(d)||!d){if(f._dur)d=f._dur;else{d=await new Promise(r=>{const h=()=>{if(isFinite(v.duration)&&v.duration){v.removeEventListener('durationchange',h);r(v.duration)}};v.addEventListener('durationchange',h);try{v.currentTime=1e7}catch(e){}setTimeout(()=>r(isFinite(v.duration)?v.duration:0),3000)});try{v.currentTime=0}catch(e){}}}
+    s.dur=d;if(!s.dur){rej();return}
     sources[id]=s;
     try{await Promise.race([v.play(),new Promise(r=>setTimeout(r,1500))]);v.pause()}catch(e){}/* en iPhone, reproducir mudo un instante hace que cargue los cuadros */
     let done=false;const fin=()=>{if(done)return;done=true;try{const c=document.createElement('canvas');c.width=72;c.height=128;drawFit(c.getContext('2d'),v,72,128,'cover');s.thumb=c.toDataURL('image/jpeg',.6)}catch(e){}res(s)};
@@ -1313,6 +1381,90 @@ function onRecStop(){
 
 /* ---------- toast ---------- */
 let tt=0;function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2400)}
+
+/* ---------- teleprompter: grabar leyendo el guion ---------- */
+const TP={script:'',speed:5,size:34,facing:'user',mic:'',stream:null,rec:null,chunks:[],pos:0,scroll:false,recOn:false,t0:0,last:0,cd:0,takes:0,wake:null,dur:0};
+try{const sv=JSON.parse(localStorage.getItem('corte-tp')||'{}');['script','speed','size','facing','mic'].forEach(k=>{if(sv[k]!==undefined)TP[k]=sv[k]})}catch(e){}
+const tpSave=()=>{try{localStorage.setItem('corte-tp',JSON.stringify({script:TP.script,speed:TP.speed,size:TP.size,facing:TP.facing,mic:TP.mic}))}catch(e){}};
+const tpEl=$('#tp'),tpCam=$('#tpCam'),tpText=$('#tpText'),tpBand=$('#tpBand');
+const tpPxs=()=>TP.speed*TP.size*0.15;/* velocidad 5 con letra 34 ≈ 25 px/s, un ritmo de habla normal */
+function tpMax(){return Math.max(0,tpText.scrollHeight-tpBand.clientHeight*0.25-window.innerHeight*0.7+40)}
+function tpApply(){TP.pos=cl(TP.pos,0,Math.max(0,tpText.scrollHeight-tpBand.clientHeight));tpText.style.transform=`translateY(${-TP.pos}px)`}
+function tpRender(){const has=!!TP.script.trim();tpText.textContent=has?TP.script.trim():'Toca "Guion" para escribir o pegar lo que vas a decir.';tpText.classList.toggle('ph',!has);
+  tpText.style.fontSize=TP.size+'px';$('#tpSpd').textContent='vel '+TP.speed;$('#tpSz').textContent=TP.size;tpApply()}
+function tpBtns(counting){tpEl.classList.toggle('rec',TP.recOn||!!counting);$('#tpScrollBtn').textContent=TP.scroll?'❚❚ Pausar':(TP.recOn?'▶ Seguir':'▶ Probar');$('#tpRec').setAttribute('aria-label',TP.recOn?'Detener':'Grabar')}
+function tpLoop(t){if(tpEl.hidden)return;const dt=TP.last?Math.min(0.1,(t-TP.last)/1000):0;TP.last=t;
+  if(TP.scroll){TP.pos+=tpPxs()*dt;const end=Math.max(0,tpText.scrollHeight-tpBand.clientHeight*0.3);if(TP.pos>=end){TP.pos=end;TP.scroll=false;tpBtns()}tpApply()}
+  if(TP.recOn){const s=(performance.now()-TP.t0)/1000;$('#tpTime').textContent=Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')}
+  requestAnimationFrame(tpLoop)}
+function tpMsg(html,actions){const m=$('#tpMsg');if(!html){m.hidden=true;return}m.innerHTML=`<div>${html}</div>`+(actions?`<div class="row"><button class="btn" data-tp="again">Grabar otra</button><button class="btn primary" data-tp="edit">Ir a editar</button></div>`:`<div class="row"><button class="btn" data-tp="ok">Entendido</button></div>`);m.hidden=false}
+$('#tpMsg').addEventListener('click',e=>{const b=e.target.closest('[data-tp]');if(!b)return;tpMsg('');if(b.dataset.tp==='edit')tpClose();else if(b.dataset.tp==='again'){TP.pos=0;tpApply()}});
+function tpStopCam(){if(TP.stream){TP.stream.getTracks().forEach(t=>t.stop());TP.stream=null}tpCam.srcObject=null}
+async function tpStartCam(){
+  tpStopCam();
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){tpMsg('Aquí no puedo usar la cámara. Abre Corte desde el ícono de tu pantalla de inicio para grabar.');return}
+  const audio=TP.mic?{deviceId:{exact:TP.mic},echoCancellation:false,noiseSuppression:false,autoGainControl:true}:{echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+  try{TP.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:TP.facing,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio})}
+  catch(e){if(TP.mic){TP.mic='';tpSave();return tpStartCam()}const n=e&&e.name;
+    tpMsg(n==='NotAllowedError'?'Corte no tiene permiso para usar la cámara o el micrófono. En el iPhone ve a Configuración → Apps → Safari → Cámara y Micrófono, elige "Preguntar" o "Permitir" y vuelve a abrir Grabar.':'No pude abrir la cámara ('+esc(e&&e.message||n||'error')+').');return}
+  tpCam.srcObject=TP.stream;tpCam.classList.toggle('mir',TP.facing==='user');try{await tpCam.play()}catch(e){}
+  const vt=TP.stream.getVideoTracks()[0];if(vt)vt.addEventListener('ended',()=>{if(TP.recOn)tpStopRec()});
+  tpMics();
+}
+async function tpMics(){try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'),sel=$('#tpMic');sel.hidden=ds.length<2;if(ds.length<2)return;
+  const a=TP.stream&&TP.stream.getAudioTracks()[0],cur=a&&a.getSettings?a.getSettings().deviceId:'';
+  sel.innerHTML=ds.map((d,i)=>`<option value="${esc(d.deviceId)}"${d.deviceId===cur?' selected':''}>🎙 ${esc(d.label||('Micrófono '+(i+1)))}</option>`).join('')}catch(e){}}
+$('#tpMic').addEventListener('change',e=>{TP.mic=e.target.value;tpSave();tpStartCam()});
+async function tpOpen(){if(exporting||busy)return;stop();tpEl.hidden=false;TP.pos=0;TP.scroll=false;TP.last=0;tpMsg('');tpRender();tpBtns();$('#tpTime').textContent='0:00';requestAnimationFrame(tpLoop);
+  if(!TP.script.trim())tpEdit(true);await tpStartCam()}
+function tpClose(){if(TP.recOn)return;clearTimeout(TP.cd);TP.cd=0;$('#tpCount').hidden=true;TP.scroll=false;tpStopCam();tpEl.hidden=true;layoutSoon()}
+function tpEdit(open){$('#tpEdit').hidden=!open;if(open){$('#tpScript').value=TP.script;$('#tpUseAu').hidden=!(AU.script&&AU.script.trim()&&AU.script.trim()!==TP.script.trim());setTimeout(()=>$('#tpScript').focus(),50)}}
+$('#tpUseAu').onclick=()=>{$('#tpScript').value=AU.script.trim()};
+$('#tpEditDone').onclick=()=>{TP.script=$('#tpScript').value;tpSave();TP.pos=0;tpEdit(false);tpRender()};
+$('#tpEditBtn').onclick=()=>tpEdit(true);
+$('#recBtn').onclick=$('#recBtn2').onclick=tpOpen;
+$('#tpClose').onclick=tpClose;
+$('#tpFlip').onclick=()=>{TP.facing=TP.facing==='user'?'environment':'user';tpSave();tpStartCam()};
+$('#tpSlow').onclick=()=>{TP.speed=Math.max(1,TP.speed-1);tpSave();tpRender()};
+$('#tpFast').onclick=()=>{TP.speed=Math.min(12,TP.speed+1);tpSave();tpRender()};
+$('#tpSmall').onclick=()=>{const r=TP.pos/(tpText.scrollHeight||1);TP.size=Math.max(20,TP.size-4);tpSave();tpRender();TP.pos=r*tpText.scrollHeight;tpApply()};
+$('#tpBig').onclick=()=>{const r=TP.pos/(tpText.scrollHeight||1);TP.size=Math.min(64,TP.size+4);tpSave();tpRender();TP.pos=r*tpText.scrollHeight;tpApply()};
+$('#tpTop').onclick=()=>{TP.pos=0;TP.scroll=false;tpApply();tpBtns()};
+$('#tpScrollBtn').onclick=()=>{TP.scroll=!TP.scroll;tpBtns()};
+/* tocar el guion lo pausa o lo sigue; arrastrarlo lo mueve */
+let tpDrag=null;
+tpBand.addEventListener('pointerdown',e=>{tpDrag={y:e.clientY,pos:TP.pos,moved:false,was:TP.scroll};tpBand.setPointerCapture(e.pointerId)});
+tpBand.addEventListener('pointermove',e=>{if(!tpDrag)return;const dy=e.clientY-tpDrag.y;if(Math.abs(dy)>6){tpDrag.moved=true;TP.scroll=false;TP.pos=tpDrag.pos-dy;tpApply()}});
+tpBand.addEventListener('pointerup',()=>{if(!tpDrag)return;if(!tpDrag.moved)TP.scroll=!tpDrag.was;else TP.scroll=tpDrag.was;tpDrag=null;tpBtns()});
+tpBand.addEventListener('pointercancel',()=>{tpDrag=null});
+function tpMime(){if(!window.MediaRecorder)return null;for(const m of['video/mp4;codecs=avc1,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm']){try{if(MediaRecorder.isTypeSupported(m))return m}catch(e){}}return''}
+$('#tpRec').onclick=()=>{
+  if(TP.recOn){tpStopRec();return}
+  if(TP.cd){clearTimeout(TP.cd);TP.cd=0;$('#tpCount').hidden=true;tpBtns();return}/* toque durante la cuenta: cancela */
+  if(!TP.stream){tpStartCam();return}
+  tpMsg('');let n=3;const c=$('#tpCount');c.textContent=n;c.hidden=false;tpBtns(true);
+  const step=()=>{n--;if(n>0){c.textContent=n;TP.cd=setTimeout(step,1000)}else{c.hidden=true;TP.cd=0;tpStartRec()}};TP.cd=setTimeout(step,1000);
+};
+function tpStartRec(){
+  const mime=tpMime();if(mime===null){tpMsg('Este navegador no puede grabar video.');tpBtns();return}
+  try{TP.rec=new MediaRecorder(TP.stream,mime?{mimeType:mime,videoBitsPerSecond:10e6,audioBitsPerSecond:192e3}:undefined)}
+  catch(e){try{TP.rec=new MediaRecorder(TP.stream)}catch(e2){tpMsg('No pude empezar a grabar.');tpBtns();return}}
+  TP.chunks=[];TP.rec.ondataavailable=e=>{if(e.data&&e.data.size)TP.chunks.push(e.data)};TP.rec.onstop=tpSaveTake;
+  TP.rec.start(1000);TP.recOn=true;TP.t0=performance.now();TP.scroll=true;
+  try{if(navigator.wakeLock)navigator.wakeLock.request('screen').then(w=>TP.wake=w).catch(()=>{})}catch(e){}
+  tpBtns();
+}
+function tpStopRec(){if(!TP.rec||!TP.recOn)return;TP.recOn=false;TP.scroll=false;TP.dur=(performance.now()-TP.t0)/1000;try{TP.rec.stop()}catch(e){}
+  if(TP.wake){TP.wake.release().catch(()=>{});TP.wake=null}tpBtns()}
+async function tpSaveTake(){
+  const type=((TP.rec&&TP.rec.mimeType)||'video/mp4').split(';')[0],ext=/mp4/.test(type)?'mp4':'webm';TP.rec=null;
+  const blob=new Blob(TP.chunks,{type});TP.chunks=[];if(!blob.size){tpMsg('La toma salió vacía. Intenta de nuevo.');return}
+  TP.takes++;const f=new File([blob],`toma-${TP.takes}.${ext}`,{type});f._dur=TP.dur;tpMsg('Guardando la toma…');
+  try{const s=await loadSource(f);push();S.clips.push(newClip(s.id,0,s.dur));if(selClip<0)selClip=0;refresh(true);srcBuf(s);
+    tpMsg(`<b>Toma ${TP.takes} agregada</b> al final de tu video (${short(s.dur)}).`,true)}
+  catch(e){tpMsg('No pude agregar la toma al editor. Intenta grabarla otra vez.')}
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&TP.recOn)tpStopRec()});
 
 /* ---------- diagnóstico: deja presionado el logo "Corte." ---------- */
 let lp=0;const brandEl=$('.brand');
