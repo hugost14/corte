@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="18nov-2252">
+<meta name="corte-build" content="18nov-2306">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -292,7 +292,8 @@ const TEXT_PRESETS={
   sub:{text:'Escribe tu subtítulo',style:'contorno',color:'#ffffff',font:'grot',size:6,y:72,anim:'none'},
   cta:{text:'Cómpralo en el carrito naranja',style:'caja',color:'#f2b544',font:'block',size:5.8,y:84,anim:'pop'}
 };
-const NOISE={off:{hp:20,lp:20000,g:0},bajo:{hp:70,lp:12000,g:.5},medio:{hp:90,lp:9500,g:.75},alto:{hp:115,lp:8000,g:.95}};
+/* la limpieza fuerte la hace la reducción espectral (más abajo); aquí solo queda un filtro de graves y, en Alto, una puerta suave */
+const NOISE={off:{hp:20,lp:20000,g:0},bajo:{hp:70,lp:20000,g:0},medio:{hp:80,lp:20000,g:0},alto:{hp:90,lp:18000,g:.35}};
 const SENS={suave:{k:.18,min:.7,pad:.14},normal:{k:.26,min:.45,pad:.1},agresivo:{k:.34,min:.3,pad:.07}};
 
 const S={clips:[],texts:[],marks:[],overlays:[],subs:{mode:'script',fix:{},script:'',words:[],style:'karaoke',y:64,size:7,hl:'#f2b544',max:3,offset:0,caps:false,hash:''},filt:{...FILTERS[0]},fit:'cover',bg:'#000000',aspect:'9:16',res:720,origVol:1,avOffset:0,musicVol:0.6,musicOffset:0,noise:'off',voice:false,sens:'normal'};
@@ -350,11 +351,11 @@ function ensureAudio(){
     const AC=window.AudioContext||window.webkitAudioContext;actx=new AC();
     const bq=(type,f,q,g)=>{const n=actx.createBiquadFilter();n.type=type;n.frequency.value=f;if(q!=null)n.Q.value=q;if(g!=null)n.gain.value=g;return n};
     A.voiceIn=actx.createGain();A.hp=bq('highpass',20,0.7);A.lp=bq('lowpass',20000,0.7);
-    A.mud=bq('peaking',260,1,0);A.pres=bq('peaking',3200,0.9,0);A.air=bq('highshelf',9000,null,0);
-    A.comp=actx.createDynamicsCompressor();A.makeup=actx.createGain();
+    A.warm=bq('lowshelf',140,null,0);A.mud=bq('peaking',300,1,0);A.pres=bq('peaking',3000,0.9,0);A.sib=bq('peaking',6800,4,0);A.air=bq('highshelf',10000,null,0);
+    A.comp=actx.createDynamicsCompressor();A.comp2=actx.createDynamicsCompressor();A.makeup=actx.createGain();
     A.lim=actx.createDynamicsCompressor();A.lim.threshold.value=-2;A.lim.knee.value=0;A.lim.ratio.value=20;A.lim.attack.value=0.002;A.lim.release.value=0.12;
     A.master=actx.createGain();
-    A.voiceIn.connect(A.hp);A.hp.connect(A.lp);A.lp.connect(A.mud);A.mud.connect(A.pres);A.pres.connect(A.air);A.air.connect(A.comp);A.comp.connect(A.makeup);A.makeup.connect(A.lim);A.lim.connect(A.master);A.master.connect(actx.destination);
+    A.voiceIn.connect(A.hp);A.hp.connect(A.lp);A.lp.connect(A.warm);A.warm.connect(A.mud);A.mud.connect(A.pres);A.pres.connect(A.sib);A.sib.connect(A.air);A.air.connect(A.comp);A.comp.connect(A.comp2);A.comp2.connect(A.makeup);A.makeup.connect(A.lim);A.lim.connect(A.master);A.master.connect(actx.destination);
     if(actx.createMediaStreamDestination){recDest=actx.createMediaStreamDestination();A.master.connect(recDest)}
     applyAudio();
     A.clipBus=actx.createGain();A.clipBus.connect(A.voiceIn);A.musicBus=actx.createGain();A.musicBus.connect(A.lim);
@@ -370,9 +371,13 @@ function applyAudio(){
   A.hp.frequency.setTargetAtTime(n.hp,t,.02);A.lp.frequency.setTargetAtTime(n.lp,t,.02);
   if(A.gate)A.gate.parameters.get('amount').setTargetAtTime(n.g,t,.02);
   const v=S.voice;
-  A.mud.gain.setTargetAtTime(v?-3.5:0,t,.02);A.pres.gain.setTargetAtTime(v?4.5:0,t,.02);A.air.gain.setTargetAtTime(v?2.5:0,t,.02);
-  A.comp.threshold.value=v?-26:0;A.comp.ratio.value=v?3.5:1;A.comp.knee.value=v?8:0;A.comp.attack.value=.005;A.comp.release.value=.2;
-  A.makeup.gain.setTargetAtTime(v?1.6:1,t,.02);
+  /* mejorar voz: cuerpo, menos "caja", claridad, "s" más suaves, brillo; nivelador + compresor de picos */
+  if(v)A.hp.frequency.setTargetAtTime(Math.max(n.hp,85),t,.02);
+  A.warm.gain.setTargetAtTime(v?1.5:0,t,.02);A.mud.gain.setTargetAtTime(v?-3:0,t,.02);A.pres.gain.setTargetAtTime(v?3.5:0,t,.02);
+  A.sib.gain.setTargetAtTime(v?-3:0,t,.02);A.air.gain.setTargetAtTime(v?3:0,t,.02);
+  A.comp.threshold.value=v?-30:0;A.comp.ratio.value=v?2.5:1;A.comp.knee.value=v?10:0;A.comp.attack.value=.012;A.comp.release.value=.18;
+  A.comp2.threshold.value=v?-14:0;A.comp2.ratio.value=v?5:1;A.comp2.knee.value=v?4:0;A.comp2.attack.value=.003;A.comp2.release.value=.1;
+  A.makeup.gain.setTargetAtTime(v?1.5:1,t,.02);
 }
 /* ---------- motor de audio: los videos van siempre mudos y el audio se toca aparte ----------
    En iPhone, conectar un <video> al procesador de audio lo congela en el primer cuadro.
@@ -389,11 +394,60 @@ function wsola(buf,speed){/* cambia la velocidad sin cambiar el tono de la voz *
     if(k>0){const ref=prev+Hs;let bc=-Infinity;for(let d=-tol;d<=tol;d+=2){const p=nom+d;if(p<0||p+N>=inL)continue;let s=0;for(let i=0;i<Hs;i+=8)s+=m[p+i]*m[ref+i];if(s>bc){bc=s;best=p}}}
     for(let c=0;c<nch;c++){const a=ch[c],b=out[c];for(let i=0;i<N;i++)b[o+i]+=a[best+i]*win[i]}prev=best}
   const nb=new AudioBuffer({length:outL,numberOfChannels:nch,sampleRate:sr});out.forEach((x,c)=>nb.copyToChannel(x,c));return nb}
-async function clipBuf(s,speed){await srcBuf(s);if(!s.buf)return null;if(speed===1)return s.buf;s.str=s.str||{};
-  if(!s.str[speed]){await new Promise(r=>setTimeout(r,0));s.str[speed]=wsola(s.buf,speed)}return s.str[speed]}
+/* Reducción de ruido espectral (filtro de Wiener con estimación "decision-directed"):
+   mide el ruido de fondo en los momentos más callados del clip y lo resta frecuencia por frecuencia. */
+const NR_SRC=`const P={bajo:{b:1.0,g:0.32},medio:{b:1.5,g:0.16},alto:{b:2.2,g:0.07}};
+function mkFFT(N){const lev=Math.round(Math.log2(N)),rev=new Uint32Array(N);for(let i=0;i<N;i++){let r=0;for(let b=0;b<lev;b++)r|=((i>>b)&1)<<(lev-1-b);rev[i]=r}
+ const cs=new Float64Array(N/2),sn=new Float64Array(N/2);for(let i=0;i<N/2;i++){cs[i]=Math.cos(2*Math.PI*i/N);sn[i]=Math.sin(2*Math.PI*i/N)}
+ return(re,im,inv)=>{for(let i=0;i<N;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}
+  for(let size=2;size<=N;size<<=1){const half=size>>1,step=N/size;for(let i=0;i<N;i+=size){for(let j=0,k=0;j<half;j++,k+=step){const c=cs[k],s=inv?sn[k]:-sn[k],a=i+j,b=a+half,tr=re[b]*c-im[b]*s,ti=re[b]*s+im[b]*c;re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti}}}
+  if(inv)for(let i=0;i<N;i++){re[i]/=N;im[i]/=N}}}
+onmessage=e=>{const{id,x,sr,level}=e.data;try{
+ const p=P[level]||P.medio,N=sr>32000?2048:1024,H=N/4,K=N/2+1,fft=mkFFT(N),w=new Float64Array(N);
+ for(let i=0;i<N;i++)w[i]=Math.sqrt(0.5-0.5*Math.cos(2*Math.PI*i/N));
+ const L=x.length,pad=N,F=Math.ceil((L+N)/H),get=i=>{const j=i-pad;return j>=0&&j<L?x[j]:0};
+ const E=new Float64Array(F);for(let f=0;f<F;f++){let s=0;const o=f*H;for(let i=0;i<N;i+=4){const v=get(o+i);s+=v*v}E[f]=s}
+ const idx=[];for(let f=0;f<F;f++)if(E[f]>1e-12)idx.push(f);idx.sort((a,b)=>E[a]-E[b]);
+ const q=idx.slice(0,Math.max(8,Math.floor(idx.length*0.15)));
+ const noise=new Float64Array(K),re=new Float64Array(N),im=new Float64Array(N);
+ for(const f of q){const o=f*H;for(let i=0;i<N;i++){re[i]=get(o+i)*w[i];im[i]=0}fft(re,im,false);for(let k=0;k<K;k++)noise[k]+=re[k]*re[k]+im[k]*im[k]}
+ for(let k=0;k<K;k++)noise[k]=noise[k]/Math.max(1,q.length)*p.b+1e-14;
+ const out=new Float32Array(L+2*N),Gp=new Float64Array(K).fill(1),pp=new Float64Array(K).fill(1),G=new Float64Array(K);
+ for(let f=0;f<F;f++){const o=f*H;for(let i=0;i<N;i++){re[i]=get(o+i)*w[i];im[i]=0}fft(re,im,false);
+  for(let k=0;k<K;k++){const post=(re[k]*re[k]+im[k]*im[k])/noise[k],prio=0.98*Gp[k]*Gp[k]*pp[k]+0.02*Math.max(post-1,0);G[k]=prio/(1+prio);pp[k]=post}
+  for(let k=0;k<K;k++){const g=Math.max(p.g,(G[k>0?k-1:0]+2*G[k]+G[k<K-1?k+1:K-1])/4);Gp[k]=g;re[k]*=g;im[k]*=g;if(k>0&&k<N/2){re[N-k]=re[k];im[N-k]=-im[k]}}
+  fft(re,im,true);for(let i=0;i<N;i++)out[o+i]+=re[i]*w[i]*0.5;
+  if(f%500===0)postMessage({id,p:f/F})}
+ const y=out.slice(pad,pad+L);postMessage({id,out:y},[y.buffer])}catch(err){postMessage({id,err:String(err)})}};`;
+let nrWorker=null;
+function denoise(buf,level,onP){return new Promise((res,rej)=>{
+  try{if(!nrWorker)nrWorker=new Worker(URL.createObjectURL(new Blob([NR_SRC],{type:'application/javascript'})))}catch(e){rej(e);return}
+  const id=Math.random(),sr=buf.sampleRate,L=buf.length,nc=buf.numberOfChannels,x=new Float32Array(L);
+  for(let c=0;c<nc;c++){const d=buf.getChannelData(c);for(let i=0;i<L;i++)x[i]+=d[i]/nc}
+  const h=e=>{if(e.data.id!==id)return;if(e.data.p!=null){if(onP)onP(e.data.p);return}nrWorker.removeEventListener('message',h);
+    if(e.data.err){rej(new Error(e.data.err));return}const nb=new AudioBuffer({length:L,numberOfChannels:1,sampleRate:sr});nb.copyToChannel(e.data.out,0);res(nb)};
+  nrWorker.addEventListener('message',h);nrWorker.postMessage({id,x,sr,level},[x.buffer]);
+})}
+let nrToast=0;
+async function procBuf(s){/* audio del clip con la reducción de ruido elegida */
+  await srcBuf(s);if(!s.buf)return null;const lvl=S.noise;if(lvl==='off')return s.buf;
+  s.nr=s.nr||{};s.nrP=s.nrP||{};
+  if(!s.nrP[lvl])s.nrP[lvl]=denoise(s.buf,lvl,p=>{if(Date.now()-nrToast>700){nrToast=Date.now();toast('Limpiando el ruido… '+Math.round(p*100)+'%')}}).then(b=>(s.nr[lvl]=b),()=>(s.nr[lvl]=s.buf));
+  return s.nrP[lvl]}
+function curBuf(s,speed){const base=(S.noise!=='off'&&s.nr&&s.nr[S.noise])||s.buf;if(speed===1)return base;return s.str&&s.str[speed+'|'+(base===s.buf?'off':S.noise)]}
+async function clipBuf(s,speed){const b=await procBuf(s);if(!b)return null;if(speed===1)return b;s.str=s.str||{};const k=speed+'|'+(b===s.buf?'off':S.noise);
+  if(!s.str[k]){await new Promise(r=>setTimeout(r,0));s.str[k]=wsola(b,speed)}return s.str[k]}
+/* nivel parejo: con "Mejorar voz", cada clip se lleva al mismo volumen de voz */
+async function normFor(s){
+  const b=await procBuf(s);if(!b)return 1;s.normG=s.normG||{};const k=S.noise;if(s.normG[k])return s.normG[k];
+  let an=null;try{an=await analyze(s)}catch(e){}
+  const d=b.getChannelData(0),sr=b.sampleRate,hop=Math.round(sr*0.01);let sum=0,n=0;
+  if(an&&an.vo){const th=subThresh(an);for(let f=0;f<an.frames;f++){if(an.vo[f]<0.5||an.sp[f]<th)continue;const o=f*hop;for(let i=0;i<hop&&o+i<d.length;i+=2){sum+=d[o+i]*d[o+i];n++}}}
+  if(n<sr*0.3){sum=0;n=0;for(let i=0;i<d.length;i+=4){sum+=d[i]*d[i];n++}}
+  const db=10*Math.log10(sum/Math.max(1,n)+1e-12);return(s.normG[k]=cl(Math.pow(10,(-20-db)/20),0.5,8))}
 async function prepareAudio(){
-  const jobs=[];S.clips.forEach(c=>{if(!c.mute&&sources[c.src])jobs.push(clipBuf(sources[c.src],c.speed))});
-  S.overlays.forEach(o=>{if(o.kind==='video'&&!o.mute&&sources[o.src])jobs.push(srcBuf(sources[o.src]))});
+  const jobs=[];S.clips.forEach(c=>{const s=sources[c.src];if(!c.mute&&s){jobs.push(clipBuf(s,c.speed));if(S.voice)jobs.push(normFor(s))}});
+  S.overlays.forEach(o=>{if(o.kind==='video'&&!o.mute&&sources[o.src])jobs.push(procBuf(sources[o.src]))});
   if(music&&!music.bufP)music.bufP=decodeAudio(music,actx?actx.sampleRate:48000).then(b=>(music.buf=b),()=>(music.buf=null));
   if(music)jobs.push(music.bufP);
   let slow=setTimeout(()=>toast('Preparando el audio…'),400);
@@ -403,17 +457,17 @@ function stopAudio(){sched.forEach(n=>{try{n.stop()}catch(e){}});sched=[]}
 function scheduleAudio(fromT){
   stopAudio();const t0=actx.currentTime+0.05,T=total();clock={ctx:true,ctxT0:t0,curT0:fromT};
   A.clipBus.gain.value=S.origVol;A.musicBus.gain.value=S.musicVol;
-  const put=(buf,when,off,dur,bus)=>{if(!buf||dur<=0.02||off>=buf.duration)return;dur=Math.min(dur,buf.duration-off);
+  const put=(buf,when,off,dur,bus,mul)=>{if(!buf||dur<=0.02||off>=buf.duration)return;dur=Math.min(dur,buf.duration-off);mul=mul||1;
     const n=actx.createBufferSource(),g=actx.createGain();n.buffer=buf;
-    g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+0.008);g.gain.setValueAtTime(1,Math.max(when+0.008,when+dur-0.01));g.gain.linearRampToValueAtTime(0,when+dur);
+    g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(mul,when+0.008);g.gain.setValueAtTime(mul,Math.max(when+0.008,when+dur-0.01));g.gain.linearRampToValueAtTime(0,when+dur);
     n.connect(g);g.connect(bus);n.start(when,Math.max(0,off),dur);sched.push(n)};
   const avo=(S.avOffset||0)/1000;
-  const putV=(buf,when,off,dur)=>{when+=avo;if(when<t0){const k=t0-when;off+=k;dur-=k;when=t0}put(buf,when,off,dur,A.clipBus)};
+  const putV=(buf,when,off,dur,s)=>{when+=avo;if(when<t0){const k=t0-when;off+=k;dur-=k;when=t0}put(buf,when,off,dur,A.clipBus,S.voice&&s&&s.normG&&s.normG[S.noise]||1)};
   let st=0;S.clips.forEach(c=>{const d=cDur(c),en=st+d,s=sources[c.src];
-    if(!c.mute&&s&&en>fromT){const from=Math.max(fromT,st),buf=c.speed===1?s.buf:(s.str&&s.str[c.speed]);
-      putV(buf,t0+(from-fromT),(c.in+(from-st)*c.speed)/c.speed,en-from)}st=en});
+    if(!c.mute&&s&&en>fromT){const from=Math.max(fromT,st),buf=curBuf(s,c.speed);
+      putV(buf,t0+(from-fromT),(c.in+(from-st)*c.speed)/c.speed,en-from,s)}st=en});
   S.overlays.forEach(o=>{if(o.kind!=='video'||o.mute||o.end<=fromT)return;const s=sources[o.src];if(!s)return;const from=Math.max(fromT,o.start);
-    putV(s.buf,t0+(from-fromT),o.in+(from-o.start),o.end-from)});
+    putV(curBuf(s,1),t0+(from-fromT),o.in+(from-o.start),o.end-from,s)});
   if(music&&music.buf)put(music.buf,t0,S.musicOffset+fromT,T-fromT,A.musicBus);
 }
 /* lo que se oye va atrasado por la latencia de salida (mucho más con audífonos Bluetooth); el video la sigue */
@@ -587,6 +641,29 @@ function silences(an,mode){
   const cuts=[];let cur=0;speech.forEach(s=>{if(s[0]>cur+0.05)cuts.push([cur,s[0]]);cur=Math.max(cur,s[1])});cuts.push([cur,1e9]);
   return cuts;
 }
+function cutsFrom(speech){const cuts=[];let cur=0;speech.forEach(s=>{if(s[0]>cur+0.05)cuts.push([cur,s[0]]);cur=Math.max(cur,s[1])});cuts.push([cur,1e9]);return cuts}
+/* Partes con voz según el reconocedor: solo cuenta donde dijiste palabras Y hay vibración de voz.
+   Ruidos, golpes, música o pitidos sin palabras quedan fuera. Los bordes se afinan con la energía de la voz. */
+async function speechCuts(s,mode,set){
+  const p=VAD[mode],an=await analyze(s);
+  if(!s.asr){const M=await asrMod();await M.load(pr=>set&&set(pr>=1?'Preparando el reconocedor de voz…':'Descargando el reconocedor de voz… '+Math.round(pr*100)+'%'));
+    set&&set('Escuchando "'+s.name+'"…');s.asr=await M.transcribe(await pcm16k(s))}
+  const hop=an.hop,n=an.frames,th=subThresh(an);
+  const voicedIn=(a,b)=>{let v=0;for(let f=Math.max(0,Math.floor(a/hop));f<Math.min(n,Math.ceil(b/hop));f++)if(an.vo[f]>=0.45&&an.sp[f]>=th)v++;return v>=3};
+  const words=s.asr.filter(w=>w.b-w.a<2.5&&voicedIn(w.a-0.08,w.b+0.08));
+  if(!words.length)return null;
+  const segs=[];words.forEach(w=>{const L=segs[segs.length-1];if(L&&w.a-L[1]<p.gap)L[1]=Math.max(L[1],w.b);else segs.push([w.a,w.b])});
+  /* Whisper suele alargar la última palabra de cada frase sobre lo que suena después (un golpe, música…).
+     Dentro de cada frase busco los tramos con voz real y me quedo solo con los que tocan el inicio de una palabra. */
+  const cores=words.map(w=>[w.a,Math.min(w.b,w.a+0.6)]),bridge=Math.round(0.15/hop),out=[];
+  segs.forEach(([a,b])=>{const fa=Math.max(0,Math.floor((a-0.2)/hop)),fb=Math.min(n-1,Math.ceil((b+0.2)/hop));const runs=[];let r=null,miss=0;
+    for(let f=fa;f<=fb;f++){if(an.sp[f]>=th){if(!r){r=[f,f,0];runs.push(r)}r[1]=f;miss=0;if(an.vo[f]>=0.45)r[2]++}else if(r&&++miss>bridge)r=null}
+    const keep=runs.filter(([x,y,v])=>v>=3&&cores.some(([ca,cb])=>ca<(y+1)*hop&&cb>x*hop));
+    if(!keep.length){out.push([Math.max(0,a-p.pre),b+p.post]);return}
+    keep.forEach(([x,y])=>out.push([Math.max(0,x*hop-p.pre),(y+1)*hop+p.post]))});
+  out.sort((x,y)=>x[0]-y[0]);const speech=[];out.forEach(q=>{const L=speech[speech.length-1];if(L&&q[0]-L[1]<p.gap)L[1]=Math.max(L[1],q[1]);else speech.push(q.slice())});
+  return cutsFrom(speech);
+}
 function fillers(an,mode){
   const th=thresh(an,mode),segs=[];let st=-1,gap=0;
   for(let f=0;f<=an.frames;f++){const voiced=f<an.frames&&an.rms[f]>=th;
@@ -610,16 +687,20 @@ function cutRanges(map){
 }
 async function autoCut(kind){
   stop();if(!S.clips.length||busy)return;busy=true;
-  modal(`<h2>${kind==='sil'?'Buscando partes sin voz…':'Buscando muletillas…'}</h2><p class="note">Estoy leyendo el audio de tus clips. En videos largos tarda unos segundos.</p><div class="bar"><i style="width:40%"></i></div>`);
-  const map={};let fail=0,noVoice=0,why='';
-  for(const id of new Set(S.clips.map(c=>c.src))){try{const an=await analyze(sources[id]);const r=kind==='sil'?silences(an,S.sens):fillers(an,S.sens);if(r===null)noVoice++;else map[id]=r}catch(e){fail++;why=String(e&&e.message||e)}}
+  modal(`<h2>${kind==='sil'?'Buscando partes sin voz…':'Buscando muletillas…'}</h2><p class="note" id="cutStep">Estoy leyendo el audio de tus clips.</p><div class="bar"><i id="cutBar" style="width:10%"></i></div><p class="note">${kind==='sil'?'Escucho tus palabras para quedarme solo con lo que dices. En videos largos tarda un poco.':''}</p>`);
+  const map={};let fail=0,noVoice=0,why='',byWords=0;const ids=[...new Set(S.clips.map(c=>c.src))];
+  for(let k=0;k<ids.length;k++){const id=ids[k],s=sources[id];const set=t=>{const a=$('#cutStep'),b=$('#cutBar');if(a)a.textContent=t;if(b)b.style.width=Math.round(10+85*k/ids.length)+'%'};
+    try{let r;
+      if(kind==='sil'){try{r=await speechCuts(s,S.sens,set);byWords++}catch(e){r=silences(await analyze(s),S.sens)}}
+      else r=fillers(await analyze(s),S.sens);
+      if(r===null)noVoice++;else map[id]=r}catch(e){fail++;why=String(e&&e.message||e)}}
   closeModal();busy=false;
   if(fail&&!Object.keys(map).length){toast(why||'No pude leer el audio de estos clips');return}
   if(kind==='sil'){
     const before=total(),nc=cutRanges(map);const cut=before-nc.reduce((a,c)=>a+cDur(c),0);
     if(cut<0.05){toast(noVoice?'No detecté voz en estos clips; no corté nada.':'No encontré partes sin voz. Prueba la sensibilidad Agresivo.');return}
     commit(()=>{S.clips=nc;S.marks=[];selClip=Math.min(Math.max(0,selClip),S.clips.length-1)});
-    toast(`Quité ${short(cut)} sin voz${noVoice?` · ${noVoice} clip${noVoice>1?'s':''} sin voz se dejaron igual`:''}${S.texts.length?'. Revisa tus textos.':''}`);
+    toast(`Quité ${short(cut)} sin voz${byWords?'':' (modo básico)'}${noVoice?` · ${noVoice} clip${noVoice>1?'s':''} sin voz se dejaron igual`:''}${S.texts.length?'. Revisa tus textos.':''}`);
   }else{
     const marks=[];Object.keys(map).forEach(id=>map[id].forEach(([a,b])=>{if(srcToT(id,a)>=0)marks.push({id:uid(),src:id,a,b})}));
     commit(()=>{S.marks=marks});
@@ -1161,8 +1242,8 @@ function act(a,v){
     case 'mkone':commit(()=>{S.marks=S.marks.filter(x=>x.id!==v)});return;
     case 'mkcut':removeMarks();return;
     case 'mkclear':commit(()=>{S.marks=[]});return;
-    case 'noise':commit(()=>{S.noise=v});applyAudio();if(v!=='off')toast('Dale play para escuchar la diferencia');return;
-    case 'voice':commit(()=>{S.voice=v==='1'});applyAudio();return;
+    case 'noise':commit(()=>{S.noise=v});applyAudio();if(v!=='off'){toast('Limpiando el ruido…');prepareAudio().then(()=>toast('Listo: dale play para escuchar la diferencia'))}return;
+    case 'voice':commit(()=>{S.voice=v==='1'});applyAudio();if(S.voice)prepareAudio();return;
     case 'tadd':addText(v);return;
     case 'tstyle':case 'tfont':case 'tanim':case 'tcolor':{const t=S.texts.find(x=>x.id===selText);if(!t)return;commit(()=>{t[{tstyle:'style',tfont:'font',tanim:'anim',tcolor:'color'}[a]]=v});return}
     case 'tin':case 'tout':{const t=S.texts.find(x=>x.id===selText);if(!t)return;commit(()=>{if(a==='tin')t.start=Math.min(curT,t.end-0.2);else t.end=Math.max(curT,t.start+0.2)});return}
@@ -1511,7 +1592,7 @@ function showDiag(){
   $('#dCopy').onclick=()=>{try{navigator.clipboard.writeText(txt).then(()=>toast('Copiado'),()=>toast('Mantén presionado el texto para copiarlo'))}catch(e){toast('Mantén presionado el texto para copiarlo')}};
 }
 
-window.__corte={state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{lead,playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
+window.__corte={asr:()=>Object.values(sources).map(s=>s.asr),state:()=>{const t=playing&&clock?Math.min(total(),nowT()):curT,l=locate(t);return{clips:S.clips.map(c=>({in:c.in,out:c.out})),noise:S.noise,lead,playing,curT,src:l?l.src:null,i:l?l.i:-1,vt:curEl?curEl.currentTime:null,two:!!(curEl&&sources[S.clips[l.i].src].el2===curEl),n:S.clips.length}}};
 window.addEventListener('orientationchange',()=>setTimeout(layoutSoon,300));
 setDims();refresh(false);draw();
 })();
