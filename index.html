@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="18nov-2236">
+<meta name="corte-build" content="18nov-2241">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1399,12 +1399,16 @@ function tpLoop(t){if(tpEl.hidden)return;const dt=TP.last?Math.min(0.1,(t-TP.las
   requestAnimationFrame(tpLoop)}
 function tpMsg(html,actions){const m=$('#tpMsg');if(!html){m.hidden=true;return}m.innerHTML=`<div>${html}</div>`+(actions?`<div class="row"><button class="btn" data-tp="again">Grabar otra</button><button class="btn primary" data-tp="edit">Ir a editar</button></div>`:`<div class="row"><button class="btn" data-tp="ok">Entendido</button></div>`);m.hidden=false}
 $('#tpMsg').addEventListener('click',e=>{const b=e.target.closest('[data-tp]');if(!b)return;tpMsg('');if(b.dataset.tp==='edit')tpClose();else if(b.dataset.tp==='again'){TP.pos=0;tpApply()}});
+/* iOS: en modo "solo reproducir" no deja usar el micrófono; al grabar cambio a "reproducir y grabar" */
+function setAudioSession(t){try{if(navigator.audioSession&&navigator.audioSession.type!==t)navigator.audioSession.type=t}catch(e){}}
 function tpStopCam(){if(TP.stream){TP.stream.getTracks().forEach(t=>t.stop());TP.stream=null}tpCam.srcObject=null}
 async function tpStartCam(){
   tpStopCam();
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){tpMsg('Aquí no puedo usar la cámara. Abre Corte desde el ícono de tu pantalla de inicio para grabar.');return}
   const audio=TP.mic?{deviceId:{exact:TP.mic},echoCancellation:false,noiseSuppression:false,autoGainControl:true}:{echoCancellation:true,noiseSuppression:true,autoGainControl:true};
-  try{TP.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:TP.facing,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio})}
+  setAudioSession('play-and-record');
+  const gum=()=>navigator.mediaDevices.getUserMedia({video:{facingMode:TP.facing,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio});
+  try{try{TP.stream=await gum()}catch(e){if(/AudioSession/i.test(String(e&&e.message))){setAudioSession('auto');TP.stream=await gum()}else throw e}}
   catch(e){if(TP.mic){TP.mic='';tpSave();return tpStartCam()}const n=e&&e.name;
     tpMsg(n==='NotAllowedError'?'Corte no tiene permiso para usar la cámara o el micrófono. En el iPhone ve a Configuración → Apps → Safari → Cámara y Micrófono, elige "Preguntar" o "Permitir" y vuelve a abrir Grabar.':'No pude abrir la cámara ('+esc(e&&e.message||n||'error')+').');return}
   tpCam.srcObject=TP.stream;tpCam.classList.toggle('mir',TP.facing==='user');try{await tpCam.play()}catch(e){}
@@ -1417,7 +1421,7 @@ async function tpMics(){try{const ds=(await navigator.mediaDevices.enumerateDevi
 $('#tpMic').addEventListener('change',e=>{TP.mic=e.target.value;tpSave();tpStartCam()});
 async function tpOpen(){if(exporting||busy)return;stop();tpEl.hidden=false;TP.pos=0;TP.scroll=false;TP.last=0;tpMsg('');tpRender();tpBtns();$('#tpTime').textContent='0:00';requestAnimationFrame(tpLoop);
   if(!TP.script.trim())tpEdit(true);await tpStartCam()}
-function tpClose(){if(TP.recOn)return;clearTimeout(TP.cd);TP.cd=0;$('#tpCount').hidden=true;TP.scroll=false;tpStopCam();tpEl.hidden=true;layoutSoon()}
+function tpClose(){if(TP.recOn)return;clearTimeout(TP.cd);TP.cd=0;$('#tpCount').hidden=true;TP.scroll=false;tpStopCam();setAudioSession('playback');tpEl.hidden=true;layoutSoon()}
 function tpEdit(open){$('#tpEdit').hidden=!open;if(open){$('#tpScript').value=TP.script;$('#tpUseAu').hidden=!(AU.script&&AU.script.trim()&&AU.script.trim()!==TP.script.trim());setTimeout(()=>$('#tpScript').focus(),50)}}
 $('#tpUseAu').onclick=()=>{$('#tpScript').value=AU.script.trim()};
 $('#tpEditDone').onclick=()=>{TP.script=$('#tpScript').value;tpSave();TP.pos=0;tpEdit(false);tpRender()};
