@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Corte</title>
-<meta name="corte-build" content="18nov-2241">
+<meta name="corte-build" content="18nov-2252">
 <meta name="description" content="Editor de video UGC para TikTok Shop. Funciona sin internet.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -42,10 +42,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 .app{position:fixed;top:0;left:0;right:0;height:var(--app-h,100dvh);max-width:560px;margin:0 auto;display:flex;flex-direction:column;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:max(6px,env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 
 .top{display:flex;align-items:center;gap:8px;padding-block:8px}
-.brand{display:flex;align-items:baseline;gap:6px;margin-right:auto;min-width:0}
+.brand{display:flex;align-items:baseline;gap:6px;margin-right:auto;min-width:0;overflow:hidden}
 .brand b{font-weight:800;font-size:21px;letter-spacing:-.02em}
 .brand b i{font-style:normal;color:var(--accent)}
-.dur{font-family:var(--mono);font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dur{font-family:var(--mono);font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .btn{height:36px;min-width:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--raise);display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:600;font-size:14px}
 .btn.icon{padding:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -75,7 +75,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .tc span{color:var(--dim)}
 
 .tlwrap{position:relative;height:166px;border-radius:10px;background:var(--panel);overflow:hidden;flex:none}
-.tl{height:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.tl{height:100%;touch-action:pan-x;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
 .tl::-webkit-scrollbar{display:none}
 .inner{position:relative;height:100%}
 .ruler{position:relative;height:20px;background-repeat:repeat-x}
@@ -201,8 +201,7 @@ textarea{width:100%;resize:none;background:var(--raise);color:var(--fg);border:1
   <div class="transport">
     <button class="play" id="playBtn" aria-label="Reproducir"><svg id="playIco" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg></button>
     <div class="tc" id="tc">00:00:00 <span>/ 00:00:00</span></div>
-    <button class="btn auto" id="autoBtn" disabled><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z"/></svg>Auto UGC</button>
-    <button class="btn icon" id="splitBtn" aria-label="Dividir en el cabezal" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg></button>
+    <button class="btn" id="splitBtn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividir</button>
   </div>
 
   <div class="tlwrap">
@@ -644,16 +643,32 @@ function zoomPreset(kind){
   });toast('Zoom agregado');
 }
 function jumpKf(dir){const l=locate(curT);if(!l)return;const c=S.clips[l.i],ks=c.kf||[];let k=dir>0?ks.find(x=>x.s>l.src+0.02):[...ks].reverse().find(x=>x.s<l.src-0.02);if(!k){toast('No hay más fotogramas en este clip');return}curT=cStart(l.i)+(k.s-c.in)/c.speed;syncScroll();showFrame();updTime();renderPanel()}
-let drag=null;
+let drag=null,pinch=null;const pts=new Map();
+const pmid=()=>{const a=[...pts.values()];return{x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2,d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1}};
+function startPinch(){
+  const m=pmid();drag=null;
+  if(tab==='capas'){const ov=curOv();if(!ov)return;pinch={type:'ov',ov,m0:m,w0:ov.w,ox:ov.x,oy:ov.y};return}
+  const l=locate(curT);if(!l)return;const c=S.clips[l.i];pinch={type:'kf',c,src:l.src,m0:m,v:{...kfVal(c,l.src)}};
+}
 cv.addEventListener('pointerdown',e=>{
   if(playing||!S.clips.length)return;const R=cv.getBoundingClientRect();
+  pts.set(e.pointerId,{x:e.clientX,y:e.clientY});try{cv.setPointerCapture(e.pointerId)}catch(err){}
+  if(pts.size===2){if(!drag)push();startPinch();return}if(pts.size>2)return;
   if(tab==='capas'){const ov=hitOv((e.clientX-R.left)/R.width*cv.width,(e.clientY-R.top)/R.height*cv.height);if(!ov)return;
     if(selOv!==ov.id){selOv=ov.id;renderPanel();renderTL()}push();drag={type:'ov',ov,x:e.clientX,y:e.clientY,ox:ov.x,oy:ov.y};cv.setPointerCapture(e.pointerId);draw();return}
   if(tab!=='zoom')return;const l=locate(curT);if(!l)return;const c=S.clips[l.i];push();drag={type:'kf',x:e.clientX,y:e.clientY,c,src:l.src,v:{...kfVal(c,l.src)}};cv.setPointerCapture(e.pointerId)});
-cv.addEventListener('pointermove',e=>{if(!drag)return;const r=cv.getBoundingClientRect();
+cv.addEventListener('pointermove',e=>{if(pts.has(e.pointerId))pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&pts.size>=2){const r=cv.getBoundingClientRect(),m=pmid(),k=m.d/pinch.m0.d,dx=(m.x-pinch.m0.x)/r.width*100,dy=(m.y-pinch.m0.y)/r.height*100;
+    if(pinch.type==='ov'){const o=pinch.ov;o.w=cl(pinch.w0*k,10,100);o.x=cl(pinch.ox+dx,-20,120);o.y=cl(pinch.oy+dy,-20,120)}
+    else{const z=cl(pinch.v.z*k,1,3);setKf(pinch.c,pinch.src,{z,x:pinch.v.x-dx/z,y:pinch.v.y-dy/z})}
+    draw();return}
+  if(!drag)return;const r=cv.getBoundingClientRect();
   if(drag.type==='ov'){drag.ov.x=cl(drag.ox+(e.clientX-drag.x)/r.width*100,-20,120);drag.ov.y=cl(drag.oy+(e.clientY-drag.y)/r.height*100,-20,120);draw();return}
   const z=drag.v.z;setKf(drag.c,drag.src,{z,x:drag.v.x-(e.clientX-drag.x)/r.width*100/z,y:drag.v.y-(e.clientY-drag.y)/r.height*100/z});draw()});
-const endDrag=()=>{if(!drag)return;drag=null;renderTL();renderPanel()};
+const endDrag=e=>{if(e)pts.delete(e.pointerId);
+  if(pinch&&pts.size<2){const p=pinch;pinch=null;renderTL();renderPanel();
+    if(p.type==='kf'&&tab!=='zoom')toast('Zoom '+Math.round(kfVal(p.c,p.src).z*100)+'% en este punto · ajústalo en la pestaña Zoom');return}
+  if(!drag)return;drag=null;renderTL();renderPanel()};
 cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
 
 /* ---------- filtro automático ---------- */
@@ -1011,11 +1026,20 @@ tl.addEventListener('scroll',()=>{
 tl.addEventListener('click',e=>{
   const c=e.target.closest('[data-clip]'),t=e.target.closest('[data-text]'),m=e.target.closest('[data-music]'),o=e.target.closest('[data-ov]');
   if(o){selOv=o.dataset.ov;openTab('capas',true)}
-  else if(c){selClip=+c.dataset.clip;selText=null;openTab(tab==='zoom'?'zoom':'editar',true)}
+  else if(c){const i=+c.dataset.clip,r=c.getBoundingClientRect(),toStart=(e.clientX-r.left)<r.width/2,st=cStart(i);
+    selClip=i;selText=null;stop();curT=toStart?st:Math.max(st,st+cDur(S.clips[i])-1/30);showFrame();updTime();
+    openTab(tab==='zoom'?'zoom':'editar',true)}
   else if(t){selText=t.dataset.text;openTab('texto',true)}
   else if(m){openTab('audio',true)}
   renderTL();
 });
+/* pellizco en la línea de tiempo: acerca o aleja */
+let tlPinch=null;const tdist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+tl.addEventListener('touchstart',e=>{if(e.touches.length===2){tlPinch={d:tdist(e.touches),pps};e.preventDefault()}},{passive:false});
+tl.addEventListener('touchmove',e=>{if(tlPinch&&e.touches.length===2){e.preventDefault();const n=cl(tlPinch.pps*tdist(e.touches)/tlPinch.d,6,240);if(Math.abs(n-pps)>0.3){pps=n;renderTL()}}},{passive:false});
+tl.addEventListener('touchend',e=>{if(e.touches.length<2)tlPinch=null});
+tl.addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();pps=cl(pps*Math.exp(-e.deltaY*0.01),6,240);renderTL()},{passive:false});
+document.addEventListener('gesturestart',e=>e.preventDefault());/* Safari: que el pellizco no agrande toda la página */
 $('#zIn').onclick=()=>{pps=Math.min(240,pps*1.5);renderTL()};
 $('#zOut').onclick=()=>{pps=Math.max(6,pps/1.5);renderTL()};
 
@@ -1113,7 +1137,6 @@ function split(){
   commit(()=>{const b=cloneClip(c);b.tr='none';b.in=l.src;c.out=l.src;S.clips.splice(l.i+1,0,b);selClip=l.i+1});toast('Clip dividido');
 }
 $('#splitBtn').onclick=()=>{stop();split()};
-$('#autoBtn').onclick=openAuto;
 function act(a,v){
   if(busy)return;stop();
   if(selClip<0||selClip>=S.clips.length)selClip=clipAtHead();
@@ -1326,7 +1349,7 @@ function refresh(withPanel){
   curT=cl(curT,0,total());
   if(S.subs.script&&S.subs.hash!==clipHash())buildSubs();
   const has=S.clips.length>0;
-  $('#empty').hidden=has;cv.style.visibility=$('#vhost').style.visibility=has?'visible':'hidden';$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;$('#autoBtn').disabled=!has;
+  $('#empty').hidden=has;cv.style.visibility=$('#vhost').style.visibility=has?'visible':'hidden';$('#exportBtn').disabled=!has;$('#splitBtn').disabled=!has;
   $('#durLbl').textContent=has?`${S.clips.length} clip${S.clips.length>1?'s':''} · ${short(total())}`:'sin clips';
   renderTL();if(withPanel)renderPanel();showFrame();updTime();
 }
